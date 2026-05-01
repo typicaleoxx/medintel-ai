@@ -43,3 +43,13 @@ class SaveReportResponse(BaseModel):
 # response wrapper for a list of reports shown on the patient page
 class ReportsListResponse(BaseModel):
     reports: list[SavedReport]
+
+
+# what the patient sends when asking a question in the chat
+class ChatRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+
+
+# what we send back after the ai answers the patients question
+class ChatResponse(BaseModel):
+    answer: str

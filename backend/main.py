@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from schemas import ReportRequest, ReportResponse, SOAPReport, SaveReportResponse, SavedReport, ReportsListResponse
-from ai import generate_soap_report
+from schemas import ReportRequest, ReportResponse, SOAPReport, SaveReportResponse, SavedReport, ReportsListResponse, ChatRequest, ChatResponse
+from ai import generate_soap_report, answer_patient_question
 from database import create_tables, save_report, get_recent_reports
 
 # load all values from the .env file into the environment before anything else
@@ -88,3 +88,25 @@ def list_reports():
         raise HTTPException(status_code=500, detail=f"database error: {str(e)}")
 
     return ReportsListResponse(reports=[SavedReport(**r) for r in rows])
+
+
+# handles patient questions by retrieving recent reports and answering from that context only
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(body: ChatRequest):
+    # fetch the last 3 reports to use as context for the ai response
+    try:
+        reports = get_recent_reports(limit=3)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"database error: {str(e)}")
+
+    # if no reports exist yet tell the patient directly instead of calling the ai
+    if not reports:
+        return ChatResponse(answer="no medical reports found in the system yet. please ask your doctor to generate a report first.")
+
+    # ask the ai to answer only based on the retrieved report context
+    try:
+        answer = answer_patient_question(body.question, reports)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ai service error: {str(e)}")
+
+    return ChatResponse(answer=answer)
