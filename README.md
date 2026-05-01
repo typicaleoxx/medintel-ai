@@ -1,8 +1,8 @@
 # MedIntel
 
-AI-powered clinical documentation and patient interaction platform.
+AI powered clinical documentation and patient interaction platform.
 
-Doctors input symptoms, observations, and diagnosis — the system generates a structured SOAP report using Gemini AI. Patients can view their report history and ask questions answered from their own medical data.
+Doctors input symptoms, observations, and diagnosis  the system generates a structured SOAP report using Gemini AI. Patients can view their report history and ask questions answered from their own medical data.
 
 **Stack:** Next.js · FastAPI · Gemini API · Neon Postgres  
 **Deployment:** Vercel (frontend) · Render (backend)  
