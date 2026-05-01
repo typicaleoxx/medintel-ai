@@ -1,0 +1,9 @@
+# all python dependencies for the medintel backend
+# pin versions so the environment is reproducible across machines and deployment
+
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+google-generativeai==0.8.3
+psycopg2-binary==2.9.10
+pydantic==2.10.3
