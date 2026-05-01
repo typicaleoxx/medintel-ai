@@ -1,5 +1,5 @@
 # this file is the entry point for the medintel fastapi backend
-# it creates the app, sets up cors so the frontend can talk to it, and wires up all api routes
+# it creates the app sets up cors so the frontend can talk to it and wires up all api routes
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from schemas import ReportRequest, ReportResponse, SOAPReport, SaveReportResponse, SavedReport, ReportsListResponse, ChatRequest, ChatResponse
+from schemas import ReportRequest, ReportResponse, SaveReportRequest, SaveReportResponse, SavedReport, ReportsListResponse, ChatRequest, ChatResponse
 from ai import generate_soap_report, answer_patient_question
 from database import create_tables, save_report, get_recent_reports
 
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MedIntel API", version="1.0.0", lifespan=lifespan)
 
 # read allowed frontend origins from env so we can change them per environment without touching code
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
 
 # allow the frontend to make requests to this backend by enabling cross origin resource sharing
 app.add_middleware(
@@ -47,7 +47,7 @@ def health_check():
 # accepts doctor input and returns an ai generated soap report
 @app.post("/api/generate-report", response_model=ReportResponse)
 def generate_report(body: ReportRequest):
-    # call the ai service to generate the soap report from the doctor's input
+    # call the ai service to generate the soap report from the doctors input
     try:
         report = generate_soap_report(
             symptoms=body.symptoms,
@@ -63,10 +63,12 @@ def generate_report(body: ReportRequest):
 
 # saves a generated soap report to the database after the doctor reviews it
 @app.post("/api/save-report", response_model=SaveReportResponse)
-def save_report_endpoint(body: SOAPReport):
-    # persist the four soap sections to the reports table and return the stored record
+def save_report_endpoint(body: SaveReportRequest):
+    # persist the patient identity and four soap sections to the reports table
     try:
         row = save_report(
+            patient_name=body.patient_name,
+            doctor_name=body.doctor_name,
             subjective=body.subjective,
             objective=body.objective,
             assessment=body.assessment,

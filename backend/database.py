@@ -16,12 +16,15 @@ def get_connection():
 
 def create_tables():
     # create the reports table if it does not already exist so the server is ready on first boot
+    # the alter table statements safely add new columns to existing databases without data loss
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS reports (
                     id SERIAL PRIMARY KEY,
+                    patient_name TEXT NOT NULL DEFAULT 'Unknown Patient',
+                    doctor_name TEXT NOT NULL DEFAULT 'Unknown Doctor',
                     subjective TEXT NOT NULL,
                     objective TEXT NOT NULL,
                     assessment TEXT NOT NULL,
@@ -29,23 +32,25 @@ def create_tables():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS patient_name TEXT NOT NULL DEFAULT 'Unknown Patient'")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS doctor_name TEXT NOT NULL DEFAULT 'Unknown Doctor'")
         conn.commit()
     finally:
         conn.close()
 
 
-def save_report(subjective: str, objective: str, assessment: str, plan: str) -> dict:
+def save_report(patient_name: str, doctor_name: str, subjective: str, objective: str, assessment: str, plan: str) -> dict:
     # insert a new report row and return the full saved record including the generated id and timestamp
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                INSERT INTO reports (subjective, objective, assessment, plan)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id, subjective, objective, assessment, plan, created_at
+                INSERT INTO reports (patient_name, doctor_name, subjective, objective, assessment, plan)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id, patient_name, doctor_name, subjective, objective, assessment, plan, created_at
                 """,
-                (subjective, objective, assessment, plan),
+                (patient_name, doctor_name, subjective, objective, assessment, plan),
             )
             row = cur.fetchone()
         conn.commit()
@@ -61,7 +66,7 @@ def get_recent_reports(limit: int = 10) -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, subjective, objective, assessment, plan, created_at
+                SELECT id, patient_name, doctor_name, subjective, objective, assessment, plan, created_at
                 FROM reports
                 ORDER BY created_at DESC
                 LIMIT %s

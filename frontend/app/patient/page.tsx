@@ -250,9 +250,10 @@ export default function PatientPage() {
                           <polyline points="14,2 14,8 20,8" strokeLinejoin="round" />
                         </svg>
                       </div>
-                      <span className="text-xs font-semibold dark:text-white text-gray-900">
-                        {formatDate(r.created_at)}
-                      </span>
+                      <div>
+                        <span className="text-xs font-semibold dark:text-white text-gray-900 block">{r.patient_name}</span>
+                        <span className="text-xs dark:text-gray-500 text-gray-400">{formatDate(r.created_at)}</span>
+                      </div>
                     </div>
                     <span className="text-xs px-2 py-0.5 dark:bg-emerald-500/15 bg-emerald-50 dark:text-emerald-400 text-emerald-600 rounded-full border dark:border-emerald-500/20 border-emerald-200 font-medium uppercase tracking-wide">
                       completed
@@ -262,16 +263,41 @@ export default function PatientPage() {
                     {r.subjective}
                   </p>
 
-                  {selectedReport?.id === r.id && (
-                    <div className="mt-3 pt-3 border-t dark:border-white/10 border-gray-200 flex flex-col gap-2 pl-8">
-                      {(["objective", "assessment", "plan"] as const).map((k) => (
-                        <div key={k}>
-                          <span className="text-xs font-semibold dark:text-violet-400 text-violet-600 capitalize">{k}</span>
-                          <p className="text-xs dark:text-gray-400 text-gray-500 mt-0.5 leading-relaxed">{r[k]}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {selectedReport?.id === r.id && (() => {
+                    const sections = [
+                      { key: "subjective" as const, label: "Subjective", color: "bg-violet-500" },
+                      { key: "objective" as const, label: "Objective", color: "bg-teal-500" },
+                      { key: "assessment" as const, label: "Assessment", color: "bg-amber-500" },
+                      { key: "plan" as const, label: "Plan", color: "bg-emerald-500" },
+                    ]
+                    const maxLen = Math.max(...sections.map(s => r[s.key].length), 1)
+                    // map percentage to a tailwind width class so we avoid inline styles
+                    const widthClass = (len: number) => {
+                      const pct = len / maxLen
+                      if (pct < 0.2) return "w-1/5"
+                      if (pct < 0.4) return "w-2/5"
+                      if (pct < 0.6) return "w-3/5"
+                      if (pct < 0.8) return "w-4/5"
+                      return "w-full"
+                    }
+                    return (
+                      <div className="mt-3 pt-3 border-t dark:border-white/10 border-gray-200 flex flex-col gap-3 pl-8">
+                        <p className="text-xs dark:text-gray-500 text-gray-400">Dr. {r.doctor_name}</p>
+                        {sections.map(({ key, label, color }) => (
+                          <div key={key}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-semibold dark:text-gray-300 text-gray-600">{label}</span>
+                              <span className="text-xs dark:text-gray-600 text-gray-400">{r[key].length} chars</span>
+                            </div>
+                            <div className="w-full dark:bg-white/8 bg-gray-200 rounded-full h-1 mb-1.5">
+                              <div className={`h-1 rounded-full ${color} opacity-70 ${widthClass(r[key].length)} transition-all`} />
+                            </div>
+                            <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed line-clamp-2">{r[key]}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </button>
               ))}
             </div>

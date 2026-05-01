@@ -226,6 +226,9 @@ frontend/.vercel/
 frontend/node_modules/
 node_modules/
 
+# lib/ is ignored as a python packaging pattern above but frontend/lib contains source code
+!frontend/lib/
+
 # next.js type generation file (auto generated, not needed in repo)
 frontend/next-env.d.ts
 *.tsbuildinfo
