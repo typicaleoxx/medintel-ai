@@ -66,9 +66,9 @@ App available at `http://localhost:3000`
 
 ---
 
-## Problems We Hit (and How We Fixed Them)
+## Problems Encountered
 
-Real issues encountered during development, documented for reference.
+Issues that came up during development and how they were resolved.
 
 ---
 
