@@ -499,11 +499,44 @@ export default function DoctorPage() {
                   </div>
                 </div>
 
-                {/* patient explanation: plain english for the patient */}
-                {report.patient_explanation && (
-                  <div className="dark:bg-blue-600/10 bg-blue-50 border dark:border-blue-500/20 border-blue-200 rounded-xl p-4 shrink-0">
-                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1.5">Patient Explanation</p>
-                    <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed">{report.patient_explanation}</p>
+                {/* patient perspective: four plain language fields for the patient portal */}
+                {(report.what_you_have || report.key_takeaways?.length > 0) && (
+                  <div className="dark:bg-blue-600/10 bg-blue-50 border dark:border-blue-500/20 border-blue-200 rounded-xl p-4 shrink-0 flex flex-col gap-3">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider">Patient Perspective</p>
+                    {report.what_you_have && (
+                      <div>
+                        <p className="text-xs font-semibold dark:text-white text-gray-900 leading-snug">{report.what_you_have}</p>
+                        {report.what_this_means && (
+                          <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed mt-1">{report.what_this_means}</p>
+                        )}
+                      </div>
+                    )}
+                    {report.key_takeaways?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold dark:text-blue-300 text-blue-700 mb-1">Key Takeaways for Patient</p>
+                        <div className="flex flex-col gap-1">
+                          {report.key_takeaways.map((t, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="text-xs dark:text-blue-400 text-blue-600 shrink-0 font-bold mt-0.5">{i + 1}.</span>
+                              <p className="text-xs dark:text-gray-300 text-gray-600 leading-snug">{t}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {report.questions_to_ask?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold dark:text-blue-300 text-blue-700 mb-1">Patient May Ask</p>
+                        <div className="flex flex-col gap-1">
+                          {report.questions_to_ask.map((q, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="text-xs dark:text-blue-400 text-blue-600 shrink-0 mt-0.5">?</span>
+                              <p className="text-xs dark:text-gray-300 text-gray-600 leading-snug">{q}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

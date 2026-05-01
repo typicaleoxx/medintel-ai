@@ -12,18 +12,25 @@ class ReportRequest(BaseModel):
     diagnosis: str = Field(..., min_length=1, max_length=2000)
 
 
-# the full structured output from the ai: four soap sections plus five intelligence fields
-# new fields default to empty so existing saved records remain valid
+# the full structured output from the ai: four soap sections, five intelligence fields,
+# and four patient understanding fields that translate clinical language into plain english
+# all new fields default to empty so existing saved records remain valid
 class SOAPReport(BaseModel):
     subjective: str
     objective: str
     assessment: str
     plan: str
+    # phase 1 intelligence fields
     diagnosis_summary: str = ""
     key_symptoms: list[str] = []
     risk_indicators: list[str] = []
     follow_up_actions: list[str] = []
     patient_explanation: str = ""
+    # phase 4 patient understanding fields
+    what_you_have: str = ""
+    what_this_means: str = ""
+    key_takeaways: list[str] = []
+    questions_to_ask: list[str] = []
 
 
 # what we send back to the client after generating a report
@@ -51,6 +58,10 @@ class SavedReport(BaseModel):
     risk_indicators: list[str] = []
     follow_up_actions: list[str] = []
     patient_explanation: str = ""
+    what_you_have: str = ""
+    what_this_means: str = ""
+    key_takeaways: list[str] = []
+    questions_to_ask: list[str] = []
     created_at: datetime
 
 

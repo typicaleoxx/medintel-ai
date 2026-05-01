@@ -1,7 +1,6 @@
 # this file handles all communication with the gemini api
-# phase 3 introduces a structured multi part prompt engineering layer:
-# every prompt has four named sections — role, context, task, constraints
-# response validation with one retry ensures no incomplete soap reports reach the client
+# phase 3: structured multi-part prompt engineering layer
+# phase 4: patient understanding layer — four new fields translate clinical output into plain language
 
 import os
 import json
@@ -35,45 +34,60 @@ def _build(*sections: _Section) -> str:
 # ── soap report generation ────────────────────────────────────────────────────
 
 _SOAP_ROLE = _Section("ROLE", """
-You are a senior clinical documentation AI with expertise in evidence-based medicine.
-Your sole function is to convert raw doctor inputs into precise, professional SOAP notes.
+You are a senior clinical documentation AI and patient communication specialist.
+You produce two kinds of output simultaneously: precise clinical SOAP notes for doctors,
+and clear plain-language summaries for patients who have no medical training.
 You do not invent clinical data. Every output field must be grounded in the inputs provided.
 """)
 
 _SOAP_FORMAT = _Section("OUTPUT FORMAT", """
-Return ONLY a valid JSON object with exactly these nine keys and types:
+Return ONLY a valid JSON object with exactly these thirteen keys:
 
-  subjective         (string)         patient-reported narrative, 2-3 sentences
-  objective          (string)         measurable clinical findings, 2-3 sentences
-  assessment         (string)         diagnosis with clinical reasoning, 2-3 sentences
-  plan               (string)         treatment and management plan, 2-3 sentences
-  diagnosis_summary  (string)         one headline sentence naming the core diagnosis
-  key_symptoms       (array<string>)  5-6 most significant symptoms as short noun phrases
-  risk_indicators    (array<string>)  1-4 specific warning signs. Empty array only if no risks apply.
-  follow_up_actions  (array<string>)  4-5 specific actionable next steps
-  patient_explanation(string)         2-3 plain English sentences for a non-medical reader
+CLINICAL FIELDS (for doctor review)
+  subjective          (string)         patient-reported narrative, 2-3 sentences
+  objective           (string)         measurable clinical findings, 2-3 sentences
+  assessment          (string)         diagnosis with clinical reasoning, 2-3 sentences
+  plan                (string)         treatment and management plan, 2-3 sentences
+  diagnosis_summary   (string)         one headline sentence naming the core diagnosis
+  key_symptoms        (array<string>)  5-6 most significant symptoms as short noun phrases
+  risk_indicators     (array<string>)  1-4 specific warning signs. Empty array only if no risks apply.
+  follow_up_actions   (array<string>)  4-5 specific actionable next steps
+  patient_explanation (string)         2-3 plain English sentences for a non-medical reader
+
+PATIENT UNDERSTANDING FIELDS (for patient portal — no jargon allowed)
+  what_you_have       (string)         one sentence starting with "You have" or "You are experiencing" naming the condition in everyday words
+  what_this_means     (string)         2-3 sentences explaining what the diagnosis means for the patient's daily life, activities, and how they might feel
+  key_takeaways       (array<string>)  3-4 most important things the patient must remember, written as "you" statements
+  questions_to_ask    (array<string>)  2-3 questions the patient should ask their doctor at the next visit
 
 No markdown. No extra keys. No text outside the JSON object.
 """)
 
 _SOAP_CONSTRAINTS = _Section("CONSTRAINTS", """
+CLINICAL CONSTRAINTS
 - Do not introduce symptoms, vitals, or findings absent from the doctor input
 - Do not speculate beyond what the provided data supports
 - All string values must be non-empty
 - key_symptoms and follow_up_actions must each contain at least 3 items
-- Each follow_up_actions entry must be a specific actionable step, not generic advice
-- patient_explanation must use plain language a patient with no medical training can understand
+- follow_up_actions entries must be specific and actionable, not generic advice
+
+PATIENT UNDERSTANDING CONSTRAINTS
+- what_you_have must start with "You have" or "You are experiencing"
+- what_this_means must mention practical impact such as activity restrictions, expected duration, or how the patient will feel
+- key_takeaways must use plain language, no Latin terms, no drug-class names — say what the patient needs to do in everyday words
+- questions_to_ask must be realistic questions a real patient might ask — not rhetorical or overly clinical
+- None of the four patient fields may contain unexplained medical abbreviations or jargon
 """)
 
-# fields that must be present and non-empty in a valid soap response
 _REQUIRED_SOAP_FIELDS = [
     "subjective", "objective", "assessment", "plan",
     "diagnosis_summary", "key_symptoms", "follow_up_actions", "patient_explanation",
+    "what_you_have", "what_this_means", "key_takeaways", "questions_to_ask",
 ]
 
 
 def _validate_soap(data: dict) -> list[str]:
-    """returns a list of field names that are missing or empty"""
+    """returns the names of fields that are missing or empty"""
     problems = []
     for field in _REQUIRED_SOAP_FIELDS:
         val = data.get(field)
@@ -88,14 +102,17 @@ def generate_soap_report(symptoms: str, observations: str, diagnosis: str) -> SO
     context_body = f"""
 A doctor has recorded the following patient encounter data:
 
-Reported symptoms:    {symptoms}
+Reported symptoms:     {symptoms}
 Clinical observations: {observations}
-Working diagnosis:    {diagnosis}
+Working diagnosis:     {diagnosis}
 """
 
-    task_body = f"""
-Generate a complete 9-field medical report as valid JSON.
-Each field must be derived from the context above and internally consistent with the others.
+    task_body = """
+Generate a complete 13-field medical report as valid JSON.
+Clinical fields must reflect professional documentation standards.
+Patient understanding fields must translate the same clinical content into clear everyday language
+that a patient with no medical background can read and immediately act on.
+Both sets of fields must be internally consistent with each other.
 """
 
     prompt = _build(
@@ -124,8 +141,8 @@ Each field must be derived from the context above and internally consistent with
             _SOAP_FORMAT,
             _SOAP_CONSTRAINTS,
             _Section("REPAIR INSTRUCTION", f"""
-Your previous response was missing or left empty the following fields: {', '.join(problems)}.
-Return the complete JSON again with ALL nine fields properly filled.
+Your previous response was missing or left empty: {', '.join(problems)}.
+Return the complete JSON again with ALL thirteen fields properly filled.
 Do not omit or leave empty any field.
 """),
         )
@@ -174,7 +191,6 @@ def build_enriched_context(reports: list[dict]) -> str:
         else _fmt_date(reports[0])
     )
 
-    # count how many visits each symptom appears in to find persistent issues
     symptom_freq: Counter = Counter()
     for r in reports:
         for s in _to_list(r.get("key_symptoms")):
@@ -185,7 +201,6 @@ def build_enriched_context(reports: list[dict]) -> str:
     all_symptoms_latest = _to_list(reports[0].get("key_symptoms"))
     new_this_visit = [s for s in all_symptoms_latest if s.lower().strip() not in recurring_set]
 
-    # deduplicate risk indicators across all visits
     seen_risks: set = set()
     unique_risks: list = []
     for r in reports:
@@ -238,7 +253,7 @@ def build_enriched_context(reports: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# ── patient chat ──────────────────────────────────────────────────────────────
+# ── patient chat (phase 3 prompt structure) ───────────────────────────────────
 
 def answer_patient_question(question: str, reports: list[dict]) -> str:
     enriched_context = build_enriched_context(reports)

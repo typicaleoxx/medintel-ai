@@ -78,6 +78,10 @@ def save_report_endpoint(body: SaveReportRequest):
             risk_indicators=body.risk_indicators,
             follow_up_actions=body.follow_up_actions,
             patient_explanation=body.patient_explanation,
+            what_you_have=body.what_you_have,
+            what_this_means=body.what_this_means,
+            key_takeaways=body.key_takeaways,
+            questions_to_ask=body.questions_to_ask,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"database error: {str(e)}")

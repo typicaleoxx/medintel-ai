@@ -46,10 +46,16 @@ def create_tables():
             cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS risk_indicators JSONB NOT NULL DEFAULT '[]'::jsonb")
             cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS follow_up_actions JSONB NOT NULL DEFAULT '[]'::jsonb")
             cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS patient_explanation TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS what_you_have TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS what_this_means TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS key_takeaways JSONB NOT NULL DEFAULT '[]'::jsonb")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS questions_to_ask JSONB NOT NULL DEFAULT '[]'::jsonb")
             # fill any nulls left by pre-migration rows so the app never sees null in these fields
             cur.execute("UPDATE reports SET key_symptoms = '[]'::jsonb WHERE key_symptoms IS NULL")
             cur.execute("UPDATE reports SET risk_indicators = '[]'::jsonb WHERE risk_indicators IS NULL")
             cur.execute("UPDATE reports SET follow_up_actions = '[]'::jsonb WHERE follow_up_actions IS NULL")
+            cur.execute("UPDATE reports SET key_takeaways = '[]'::jsonb WHERE key_takeaways IS NULL")
+            cur.execute("UPDATE reports SET questions_to_ask = '[]'::jsonb WHERE questions_to_ask IS NULL")
         conn.commit()
     finally:
         conn.close()
@@ -67,6 +73,10 @@ def save_report(
     risk_indicators: list = None,
     follow_up_actions: list = None,
     patient_explanation: str = "",
+    what_you_have: str = "",
+    what_this_means: str = "",
+    key_takeaways: list = None,
+    questions_to_ask: list = None,
 ) -> dict:
     # insert a new report row and return the full saved record including the generated id and timestamp
     conn = get_connection()
@@ -77,13 +87,15 @@ def save_report(
                 INSERT INTO reports (
                     patient_name, doctor_name,
                     subjective, objective, assessment, plan,
-                    diagnosis_summary, key_symptoms, risk_indicators, follow_up_actions, patient_explanation
+                    diagnosis_summary, key_symptoms, risk_indicators, follow_up_actions, patient_explanation,
+                    what_you_have, what_this_means, key_takeaways, questions_to_ask
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb)
                 RETURNING
                     id, patient_name, doctor_name,
                     subjective, objective, assessment, plan,
                     diagnosis_summary, key_symptoms, risk_indicators, follow_up_actions, patient_explanation,
+                    what_you_have, what_this_means, key_takeaways, questions_to_ask,
                     created_at
                 """,
                 (
@@ -94,6 +106,10 @@ def save_report(
                     json.dumps(risk_indicators or []),
                     json.dumps(follow_up_actions or []),
                     patient_explanation,
+                    what_you_have,
+                    what_this_means,
+                    json.dumps(key_takeaways or []),
+                    json.dumps(questions_to_ask or []),
                 ),
             )
             row = cur.fetchone()
@@ -114,6 +130,7 @@ def get_recent_reports(limit: int = 10) -> list[dict]:
                     id, patient_name, doctor_name,
                     subjective, objective, assessment, plan,
                     diagnosis_summary, key_symptoms, risk_indicators, follow_up_actions, patient_explanation,
+                    what_you_have, what_this_means, key_takeaways, questions_to_ask,
                     created_at
                 FROM reports
                 ORDER BY created_at DESC

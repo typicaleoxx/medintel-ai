@@ -267,28 +267,50 @@ export default function PatientPage() {
                     <div className="mt-3 pt-3 border-t dark:border-white/10 border-gray-200 flex flex-col gap-3 pl-8">
                       <p className="text-xs dark:text-gray-500 text-gray-400">Dr. {r.doctor_name}</p>
 
-                      {/* plain english explanation is the most useful thing for a patient */}
-                      {r.patient_explanation && (
-                        <div className="dark:bg-violet-500/10 bg-violet-50 border dark:border-violet-500/20 border-violet-200 rounded-lg p-3">
-                          <p className="text-xs dark:text-gray-200 text-gray-700 leading-relaxed">{r.patient_explanation}</p>
+                      {/* patient understanding section — plain language, no jargon */}
+                      {(r.what_you_have || r.what_this_means) && (
+                        <div className="dark:bg-violet-500/10 bg-violet-50 border dark:border-violet-500/20 border-violet-200 rounded-lg p-3 flex flex-col gap-2">
+                          <p className="text-xs font-bold text-violet-500 uppercase tracking-wider">Your Health Summary</p>
+                          {r.what_you_have && (
+                            <p className="text-xs font-semibold dark:text-white text-gray-900 leading-snug">{r.what_you_have}</p>
+                          )}
+                          {r.what_this_means && (
+                            <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed">{r.what_this_means}</p>
+                          )}
                         </div>
                       )}
 
-                      {/* key symptoms as compact pills */}
-                      {r.key_symptoms?.length > 0 && (
+                      {/* key takeaways — numbered points the patient must remember */}
+                      {r.key_takeaways?.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Key Symptoms</p>
-                          <div className="flex flex-wrap gap-1">
-                            {r.key_symptoms.map((s) => (
-                              <span key={s} className="text-xs px-2 py-0.5 dark:bg-white/8 bg-gray-100 dark:text-gray-300 text-gray-600 rounded-full border dark:border-white/10 border-gray-200">
-                                {s}
-                              </span>
+                          <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Key Takeaways</p>
+                          <div className="flex flex-col gap-1.5">
+                            {r.key_takeaways.map((t, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className="w-4 h-4 rounded-full bg-violet-600/20 border border-violet-500/30 text-violet-400 text-xs flex items-center justify-center shrink-0 font-bold mt-0.5">{i + 1}</span>
+                                <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed">{t}</p>
+                              </div>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {/* follow-up actions as a numbered checklist */}
+                      {/* questions to ask at the next visit */}
+                      {r.questions_to_ask?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Questions to Ask Your Doctor</p>
+                          <div className="flex flex-col gap-1.5">
+                            {r.questions_to_ask.map((q, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className="text-xs dark:text-blue-400 text-blue-600 shrink-0 mt-0.5">?</span>
+                                <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed">{q}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* follow-up actions checklist */}
                       {r.follow_up_actions?.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Follow-up Actions</p>
@@ -303,7 +325,7 @@ export default function PatientPage() {
                         </div>
                       )}
 
-                      {/* risk indicators so patients know what to watch for */}
+                      {/* risk watch list */}
                       {r.risk_indicators?.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold dark:text-amber-400 text-amber-600 mb-1.5">Watch For</p>
