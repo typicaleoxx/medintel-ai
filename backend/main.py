@@ -54,8 +54,10 @@ def generate_report(body: ReportRequest):
             observations=body.observations,
             diagnosis=body.diagnosis,
         )
+    except ValueError as e:
+        # safety validation rejected the output — tell the client clearly
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        # surface a clean error to the client if the ai call fails for any reason
         raise HTTPException(status_code=502, detail=f"ai service error: {str(e)}")
 
     return ReportResponse(report=report)

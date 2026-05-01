@@ -9,6 +9,7 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from schemas import SOAPReport
+from safety import check_chat_response, append_emergency_disclaimer_if_needed, validate_soap_fields
 
 load_dotenv()
 
@@ -153,7 +154,14 @@ Do not omit or leave empty any field.
         )
         data = json.loads(response.text)
 
-    return SOAPReport(**data)
+    report = SOAPReport(**data)
+
+    # phase 5: validate patient-facing fields for unsafe content before returning
+    safety = validate_soap_fields(data)
+    if not safety.safe:
+        raise ValueError(f"soap report failed safety check: {safety.reason}")
+
+    return report
 
 
 # ── context enrichment (phase 2) ─────────────────────────────────────────────
@@ -304,4 +312,19 @@ Question: {question}
         contents=prompt,
     )
 
-    return response.text.strip()
+    answer = response.text.strip()
+
+    # phase 5: block responses that contain hallucinated or out-of-scope medical advice
+    safety = check_chat_response(answer)
+    if not safety.safe:
+        # return a safe fallback rather than surfacing the unsafe answer to the patient
+        answer = (
+            "I can only answer based on information in your medical records. "
+            "I wasn't able to give a reliable answer to this question from the available data. "
+            "Please speak with your doctor directly."
+        )
+
+    # append emergency disclaimer if the response mentions emergency-level symptoms
+    answer = append_emergency_disclaimer_if_needed(answer)
+
+    return answer
