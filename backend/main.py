@@ -100,9 +100,9 @@ def list_reports():
 # handles patient questions by retrieving recent reports and answering from that context only
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(body: ChatRequest):
-    # fetch the last 3 reports to use as context for the ai response
+    # fetch the last 5 reports so the enrichment layer has enough visits to detect patterns
     try:
-        reports = get_recent_reports(limit=3)
+        reports = get_recent_reports(limit=5)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"database error: {str(e)}")
 
