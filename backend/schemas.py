@@ -1,6 +1,7 @@
 # this file defines all the data shapes the api accepts and returns
 # pydantic validates incoming data automatically so we never process garbage input
 
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -22,3 +23,23 @@ class SOAPReport(BaseModel):
 # what we send back to the client after generating a report
 class ReportResponse(BaseModel):
     report: SOAPReport
+
+
+# a report that has been persisted in the database including its id and timestamp
+class SavedReport(BaseModel):
+    id: int
+    subjective: str
+    objective: str
+    assessment: str
+    plan: str
+    created_at: datetime
+
+
+# response wrapper for a single saved report
+class SaveReportResponse(BaseModel):
+    report: SavedReport
+
+
+# response wrapper for a list of reports shown on the patient page
+class ReportsListResponse(BaseModel):
+    reports: list[SavedReport]
