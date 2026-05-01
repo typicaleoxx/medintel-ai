@@ -125,3 +125,11 @@ Fix: whenever `requirements.txt` changes, always run `pip install -r requirement
 After switching to the new `google-genai` SDK, requests using `gemini-1.5-flash` returned a 404 saying the model is not found. The model was removed from the API entirely by the time of development.
 
 Fix: listed available models with `client.models.list()` and switched to `gemini-2.0-flash` which is available on the free tier.
+
+---
+
+**gemini-2.0-flash and gemini-2.0-flash-lite both showing limit: 0 on free tier**
+
+Even with a fresh API key from a brand new AI Studio project, both flash models returned `limit: 0` across all free tier quota metrics. This is an account level restriction, not a project issue.
+
+Fix: tested all available models using `client.models.list()` and found `gemini-2.5-flash` was the only one that worked. Switched to that model. To find which model works on your account run: `for model in available_models: try generate_content and print WORKS or FAIL`.
