@@ -3,15 +3,24 @@
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Inter", Arial, Helvetica, sans-serif;
 }
 
-/* chat panel height so we can avoid inline calc styles */
+/* chat panel fills remaining vertical space */
 .chat-panel-height {
-  height: calc(100vh - 220px);
+  height: calc(100vh - 240px);
 }
 
-/* staggered bounce delays for the typing indicator dots */
+/* typing indicator bounce delays */
 .bounce-delay-0 { animation-delay: 0s; }
 .bounce-delay-1 { animation-delay: 0.15s; }
 .bounce-delay-2 { animation-delay: 0.3s; }
+
+/* gradient border glow on cards (hover effect) */
+.card-glow:hover {
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3), 0 4px 24px rgba(139, 92, 246, 0.08);
+}
+
+/* area chart gradient fill */
+.chart-gradient-start { stop-color: #8b5cf6; stop-opacity: 0.3; }
+.chart-gradient-end   { stop-color: #8b5cf6; stop-opacity: 0; }

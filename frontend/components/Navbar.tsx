@@ -21,14 +21,14 @@ export default function Navbar() {
 
         {/* logo with waveform icon and product name */}
         <Link href="/doctor" className="flex items-center gap-2.5 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
             <svg viewBox="0 0 24 24" className="w-4 h-4 text-white fill-none stroke-current stroke-2">
               <polyline points="2,12 6,6 10,16 14,8 18,14 22,12" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
           <span className="font-semibold text-sm">
             <span className="dark:text-white text-gray-900">Med</span>
-            <span className="text-blue-500">Intel</span>
+            <span className="text-violet-500">Intel</span>
           </span>
         </Link>
 
@@ -42,7 +42,7 @@ export default function Navbar() {
                 href={tab.href}
                 className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-blue-600 text-white shadow-sm"
+                    ? "bg-violet-600 text-white shadow-sm"
                     : "dark:text-gray-400 text-gray-500 dark:hover:text-white hover:text-gray-900"
                 }`}
               >
