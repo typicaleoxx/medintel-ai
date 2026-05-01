@@ -1,6 +1,7 @@
 # this file handles all communication with the gemini api
-# it builds prompts sends them to gemini and parses structured responses
-# phase 2 adds a context enrichment layer that detects patterns across multiple visits before answering
+# phase 3 introduces a structured multi part prompt engineering layer:
+# every prompt has four named sections — role, context, task, constraints
+# response validation with one retry ensures no incomplete soap reports reach the client
 
 import os
 import json
@@ -15,43 +16,132 @@ load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
+# ── prompt builder ────────────────────────────────────────────────────────────
+
+class _Section:
+    """one labeled block in a multi-part prompt"""
+    def __init__(self, heading: str, body: str):
+        self._text = f"[{heading}]\n{body.strip()}"
+
+    def __str__(self) -> str:
+        return self._text
+
+
+def _build(*sections: _Section) -> str:
+    """join sections with blank lines so the model sees clear boundaries"""
+    return "\n\n".join(str(s) for s in sections)
+
+
+# ── soap report generation ────────────────────────────────────────────────────
+
+_SOAP_ROLE = _Section("ROLE", """
+You are a senior clinical documentation AI with expertise in evidence-based medicine.
+Your sole function is to convert raw doctor inputs into precise, professional SOAP notes.
+You do not invent clinical data. Every output field must be grounded in the inputs provided.
+""")
+
+_SOAP_FORMAT = _Section("OUTPUT FORMAT", """
+Return ONLY a valid JSON object with exactly these nine keys and types:
+
+  subjective         (string)         patient-reported narrative, 2-3 sentences
+  objective          (string)         measurable clinical findings, 2-3 sentences
+  assessment         (string)         diagnosis with clinical reasoning, 2-3 sentences
+  plan               (string)         treatment and management plan, 2-3 sentences
+  diagnosis_summary  (string)         one headline sentence naming the core diagnosis
+  key_symptoms       (array<string>)  5-6 most significant symptoms as short noun phrases
+  risk_indicators    (array<string>)  1-4 specific warning signs. Empty array only if no risks apply.
+  follow_up_actions  (array<string>)  4-5 specific actionable next steps
+  patient_explanation(string)         2-3 plain English sentences for a non-medical reader
+
+No markdown. No extra keys. No text outside the JSON object.
+""")
+
+_SOAP_CONSTRAINTS = _Section("CONSTRAINTS", """
+- Do not introduce symptoms, vitals, or findings absent from the doctor input
+- Do not speculate beyond what the provided data supports
+- All string values must be non-empty
+- key_symptoms and follow_up_actions must each contain at least 3 items
+- Each follow_up_actions entry must be a specific actionable step, not generic advice
+- patient_explanation must use plain language a patient with no medical training can understand
+""")
+
+# fields that must be present and non-empty in a valid soap response
+_REQUIRED_SOAP_FIELDS = [
+    "subjective", "objective", "assessment", "plan",
+    "diagnosis_summary", "key_symptoms", "follow_up_actions", "patient_explanation",
+]
+
+
+def _validate_soap(data: dict) -> list[str]:
+    """returns a list of field names that are missing or empty"""
+    problems = []
+    for field in _REQUIRED_SOAP_FIELDS:
+        val = data.get(field)
+        if not val:
+            problems.append(field)
+        elif isinstance(val, list) and len(val) == 0:
+            problems.append(field)
+    return problems
+
+
 def generate_soap_report(symptoms: str, observations: str, diagnosis: str) -> SOAPReport:
-    # deep structured prompt forces clinical reasoning across all nine output fields
-    prompt = f"""You are a senior clinical documentation AI with deep medical expertise. Analyze the patient data carefully and generate a comprehensive, clinically accurate medical report.
+    context_body = f"""
+A doctor has recorded the following patient encounter data:
 
-Patient Data:
-- Reported symptoms: {symptoms}
-- Clinical observations: {observations}
-- Working diagnosis: {diagnosis}
+Reported symptoms:    {symptoms}
+Clinical observations: {observations}
+Working diagnosis:    {diagnosis}
+"""
 
-Return ONLY valid JSON with exactly these nine fields. No markdown. No extra text.
+    task_body = f"""
+Generate a complete 9-field medical report as valid JSON.
+Each field must be derived from the context above and internally consistent with the others.
+"""
 
-{{
-  "subjective": "Professional 2-3 sentence narrative of the patient's symptoms in their own voice, capturing onset, severity, and context",
-  "objective": "Professional 2-3 sentence summary of measurable clinical findings, vitals, and examination results",
-  "assessment": "Professional 2-3 sentence clinical reasoning: primary diagnosis with supporting evidence and relevant differentials",
-  "plan": "Professional 2-3 sentence treatment plan: medications, interventions, monitoring frequency, and timeline",
-  "diagnosis_summary": "One clear sentence stating the core diagnosis in plain terms suitable for a record header",
-  "key_symptoms": ["5 to 6 most clinically significant symptoms as short noun phrases extracted from the patient data"],
-  "risk_indicators": ["1 to 4 specific concrete warning signs the patient must watch for. Actionable phrases like seek emergency care if X or contact doctor immediately if Y. Use empty array only if there are genuinely zero risks."],
-  "follow_up_actions": ["4 to 5 specific next steps such as schedule blood pressure recheck in 2 weeks or take prescribed antibiotic twice daily for 7 days or avoid strenuous activity for 48 hours"],
-  "patient_explanation": "2 to 3 sentences explaining the diagnosis and next steps in plain English for a patient with no medical background. Be honest, clear, and reassuring."
-}}"""
+    prompt = _build(
+        _SOAP_ROLE,
+        _Section("CONTEXT", context_body),
+        _Section("TASK", task_body),
+        _SOAP_FORMAT,
+        _SOAP_CONSTRAINTS,
+    )
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-        ),
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
 
     data = json.loads(response.text)
+    problems = _validate_soap(data)
+
+    # one retry with an explicit repair instruction if any required fields are missing or empty
+    if problems:
+        repair_prompt = _build(
+            _SOAP_ROLE,
+            _Section("CONTEXT", context_body),
+            _Section("TASK", task_body),
+            _SOAP_FORMAT,
+            _SOAP_CONSTRAINTS,
+            _Section("REPAIR INSTRUCTION", f"""
+Your previous response was missing or left empty the following fields: {', '.join(problems)}.
+Return the complete JSON again with ALL nine fields properly filled.
+Do not omit or leave empty any field.
+"""),
+        )
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=repair_prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        data = json.loads(response.text)
+
     return SOAPReport(**data)
 
 
+# ── context enrichment (phase 2) ─────────────────────────────────────────────
+
 def _to_list(val) -> list:
-    # normalize a field that may arrive as a python list, a json string, or none
     if not val:
         return []
     if isinstance(val, str):
@@ -71,16 +161,18 @@ def _fmt_date(report: dict) -> str:
 
 def build_enriched_context(reports: list[dict]) -> str:
     """
-    transforms raw reports into a structured context that highlights patterns.
-    recurring symptoms are flagged, risks are deduplicated, and a timeline
-    shows how the patients condition has evolved across visits.
-    this condensed signal-focused context replaces a flat dump of raw text.
+    transforms raw reports into a structured signal-focused context block.
+    detects recurring symptoms, deduplicates risks, and builds a temporal timeline.
     """
     if not reports:
         return ""
 
     patient_name = reports[0].get("patient_name", "Unknown Patient")
-    date_range = f"{_fmt_date(reports[-1])} to {_fmt_date(reports[0])}" if len(reports) > 1 else _fmt_date(reports[0])
+    date_range = (
+        f"{_fmt_date(reports[-1])} to {_fmt_date(reports[0])}"
+        if len(reports) > 1
+        else _fmt_date(reports[0])
+    )
 
     # count how many visits each symptom appears in to find persistent issues
     symptom_freq: Counter = Counter()
@@ -88,10 +180,12 @@ def build_enriched_context(reports: list[dict]) -> str:
         for s in _to_list(r.get("key_symptoms")):
             symptom_freq[s.lower().strip()] += 1
 
-    recurring = sorted([s for s, count in symptom_freq.items() if count >= 2])
+    recurring = sorted([s for s, n in symptom_freq.items() if n >= 2])
+    recurring_set = set(recurring)
     all_symptoms_latest = _to_list(reports[0].get("key_symptoms"))
+    new_this_visit = [s for s in all_symptoms_latest if s.lower().strip() not in recurring_set]
 
-    # deduplicate risk indicators across all visits — a risk noted once is still a risk
+    # deduplicate risk indicators across all visits
     seen_risks: set = set()
     unique_risks: list = []
     for r in reports:
@@ -104,78 +198,91 @@ def build_enriched_context(reports: list[dict]) -> str:
     latest_followup = _to_list(reports[0].get("follow_up_actions"))
 
     lines: list[str] = []
+    lines.append(f"Patient: {patient_name}")
+    lines.append(f"Visits on record: {len(reports)}  |  Date range: {date_range}")
 
-    lines.append(f"PATIENT: {patient_name}")
-    lines.append(f"VISITS ON RECORD: {len(reports)}  |  DATE RANGE: {date_range}")
-
-    # recurring symptoms are the most clinically important signal — highlight them first
     if recurring:
         lines.append(
-            f"\nRECURRING SYMPTOMS (present in multiple visits — likely unresolved or chronic):\n  {', '.join(recurring)}"
+            f"\nRecurring symptoms across visits (likely unresolved or chronic):\n  {', '.join(recurring)}"
         )
 
-    # single symptom from latest visit that are not recurring
-    new_this_visit = [s for s in all_symptoms_latest if s.lower().strip() not in set(recurring)]
     if new_this_visit:
-        lines.append(f"\nNEW SYMPTOMS (current visit only):\n  {', '.join(new_this_visit)}")
+        lines.append(f"\nNew symptoms (current visit only):\n  {', '.join(new_this_visit)}")
 
-    # all risk indicators deduplicated across the full visit history
     if unique_risks:
-        lines.append(f"\nCUMULATIVE RISK INDICATORS (across all visits):")
+        lines.append("\nCumulative risk indicators (across all visits):")
         for risk in unique_risks:
             lines.append(f"  • {risk}")
 
-    # current follow-up plan from the most recent visit
     if latest_followup:
-        lines.append(f"\nCURRENT FOLLOW-UP PLAN:")
+        lines.append("\nCurrent follow-up plan:")
         for i, action in enumerate(latest_followup, 1):
             lines.append(f"  {i}. {action}")
 
-    # chronological timeline so the ai can reason about progression
-    lines.append(f"\nVISIT TIMELINE (oldest to newest):")
+    lines.append("\nVisit timeline (oldest to newest):")
     for r in reversed(reports):
-        date = _fmt_date(r)
-        diagnosis = r.get("diagnosis_summary") or r.get("assessment", "")[:120]
         symptoms = _to_list(r.get("key_symptoms"))
         explanation = r.get("patient_explanation", "")
-
-        lines.append(f"\n  [{date}]")
-        lines.append(f"  Diagnosis: {diagnosis}")
+        lines.append(f"\n  [{_fmt_date(r)}]")
+        lines.append(f"  Diagnosis: {r.get('diagnosis_summary') or r.get('assessment', '')[:120]}")
         if symptoms:
-            lines.append(f"  Symptoms recorded: {', '.join(symptoms)}")
+            lines.append(f"  Symptoms: {', '.join(symptoms)}")
         if explanation:
             lines.append(f"  Plain summary: {explanation}")
 
-    # full clinical detail from the latest visit for depth
     latest = reports[0]
-    lines.append(f"\nLATEST CLINICAL DETAILS ({_fmt_date(latest)}):")
-    lines.append(f"  Full assessment: {latest.get('assessment', '')}")
+    lines.append(f"\nLatest clinical details ({_fmt_date(latest)}):")
+    lines.append(f"  Assessment: {latest.get('assessment', '')}")
     lines.append(f"  Treatment plan: {latest.get('plan', '')}")
 
     return "\n".join(lines)
 
 
+# ── patient chat ──────────────────────────────────────────────────────────────
+
 def answer_patient_question(question: str, reports: list[dict]) -> str:
-    # build an enriched context that highlights patterns instead of dumping raw text
     enriched_context = build_enriched_context(reports)
     patient_name = reports[0].get("patient_name", "the patient") if reports else "the patient"
 
-    # prompt explicitly instructs the ai to use the pattern signals in the enriched context
-    prompt = f"""You are a helpful AI health assistant for {patient_name}. Answer questions based ONLY on the structured medical context below. Do not use outside medical knowledge or make up information.
+    role = _Section("ROLE", f"""
+You are a compassionate patient health assistant for {patient_name}.
+You communicate clearly, avoid unexplained medical jargon, and never speculate beyond
+what is documented in the patient's medical records.
+""")
 
-Medical Context:
+    context = _Section("CONTEXT", f"""
+The following is a structured summary of {patient_name}'s medical visit history.
+Recurring symptoms, risk indicators, follow-up plans, and visit timelines are included.
+
 {enriched_context}
+""")
 
-Patient Question: {question}
+    task = _Section("TASK", f"""
+Answer the following question using only the information in the context above.
+Your answer must be accurate, concise, and easy for a non-medical person to understand.
 
-Instructions:
-- If recurring symptoms are listed and relevant to the question, mention that they have appeared across multiple visits
-- Reference specific dates when it helps clarify the timeline
-- If a follow-up action directly addresses what the patient is asking about, highlight it
-- If a risk indicator relates to the question, make sure to mention it clearly
-- Use simple plain language — no unexplained medical jargon
-- If the answer is not in the context above say clearly that you cannot find that information in the available records
-- Keep the answer focused and directly relevant to what was asked"""
+Question: {question}
+""")
+
+    response_format = _Section("RESPONSE FORMAT", """
+- Lead with a direct answer in the first sentence
+- Use 1 to 3 short paragraphs
+- If a recurring symptom pattern is relevant to the question, mention it explicitly
+- If a risk indicator is relevant, always include it
+- If a follow-up action addresses what the patient is asking, highlight it at the end
+""")
+
+    constraints = _Section("CONSTRAINTS", """
+- You MUST only use facts that appear in the context above
+- If information is not in the context, respond with exactly: "I don't have that information in your available records."
+- Do not recommend treatments, medications, or dosages not documented in the records
+- Do not infer a diagnosis not explicitly stated in the records
+- Do not use phrases like "I think" or "possibly" unless noting a differential that appears in the records
+- Do not include general medical advice ungrounded in these specific records
+- Never contradict information that is present in the context
+""")
+
+    prompt = _build(role, context, task, response_format, constraints)
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
