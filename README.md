@@ -117,3 +117,11 @@ Fix: migrated to the new `google-genai` SDK which targets v1 by default. Import 
 After changing `requirements.txt` from `google-generativeai` to `google-genai`, uvicorn crashed with `ImportError: cannot import name 'genai' from 'google'` because the venv still had the old package and not the new one.
 
 Fix: whenever `requirements.txt` changes, always run `pip install -r requirements.txt` inside the venv before restarting the server.
+
+---
+
+**gemini-1.5-flash model removed from API**
+
+After switching to the new `google-genai` SDK, requests using `gemini-1.5-flash` returned a 404 saying the model is not found. The model was removed from the API entirely by the time of development.
+
+Fix: listed available models with `client.models.list()` and switched to `gemini-2.0-flash` which is available on the free tier.
