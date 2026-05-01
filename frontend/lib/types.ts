@@ -5,6 +5,11 @@ export interface SOAPReport {
   objective: string
   assessment: string
   plan: string
+  diagnosis_summary: string
+  key_symptoms: string[]
+  risk_indicators: string[]
+  follow_up_actions: string[]
+  patient_explanation: string
 }
 
 export interface SavedReport extends SOAPReport {

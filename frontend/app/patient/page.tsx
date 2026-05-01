@@ -263,41 +263,62 @@ export default function PatientPage() {
                     {r.subjective}
                   </p>
 
-                  {selectedReport?.id === r.id && (() => {
-                    const sections = [
-                      { key: "subjective" as const, label: "Subjective", color: "bg-violet-500" },
-                      { key: "objective" as const, label: "Objective", color: "bg-teal-500" },
-                      { key: "assessment" as const, label: "Assessment", color: "bg-amber-500" },
-                      { key: "plan" as const, label: "Plan", color: "bg-emerald-500" },
-                    ]
-                    const maxLen = Math.max(...sections.map(s => r[s.key].length), 1)
-                    // map percentage to a tailwind width class so we avoid inline styles
-                    const widthClass = (len: number) => {
-                      const pct = len / maxLen
-                      if (pct < 0.2) return "w-1/5"
-                      if (pct < 0.4) return "w-2/5"
-                      if (pct < 0.6) return "w-3/5"
-                      if (pct < 0.8) return "w-4/5"
-                      return "w-full"
-                    }
-                    return (
-                      <div className="mt-3 pt-3 border-t dark:border-white/10 border-gray-200 flex flex-col gap-3 pl-8">
-                        <p className="text-xs dark:text-gray-500 text-gray-400">Dr. {r.doctor_name}</p>
-                        {sections.map(({ key, label, color }) => (
-                          <div key={key}>
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs font-semibold dark:text-gray-300 text-gray-600">{label}</span>
-                              <span className="text-xs dark:text-gray-600 text-gray-400">{r[key].length} chars</span>
-                            </div>
-                            <div className="w-full dark:bg-white/8 bg-gray-200 rounded-full h-1 mb-1.5">
-                              <div className={`h-1 rounded-full ${color} opacity-70 ${widthClass(r[key].length)} transition-all`} />
-                            </div>
-                            <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed line-clamp-2">{r[key]}</p>
+                  {selectedReport?.id === r.id && (
+                    <div className="mt-3 pt-3 border-t dark:border-white/10 border-gray-200 flex flex-col gap-3 pl-8">
+                      <p className="text-xs dark:text-gray-500 text-gray-400">Dr. {r.doctor_name}</p>
+
+                      {/* plain english explanation is the most useful thing for a patient */}
+                      {r.patient_explanation && (
+                        <div className="dark:bg-violet-500/10 bg-violet-50 border dark:border-violet-500/20 border-violet-200 rounded-lg p-3">
+                          <p className="text-xs dark:text-gray-200 text-gray-700 leading-relaxed">{r.patient_explanation}</p>
+                        </div>
+                      )}
+
+                      {/* key symptoms as compact pills */}
+                      {r.key_symptoms?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Key Symptoms</p>
+                          <div className="flex flex-wrap gap-1">
+                            {r.key_symptoms.map((s) => (
+                              <span key={s} className="text-xs px-2 py-0.5 dark:bg-white/8 bg-gray-100 dark:text-gray-300 text-gray-600 rounded-full border dark:border-white/10 border-gray-200">
+                                {s}
+                              </span>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    )
-                  })()}
+                        </div>
+                      )}
+
+                      {/* follow-up actions as a numbered checklist */}
+                      {r.follow_up_actions?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Follow-up Actions</p>
+                          <div className="flex flex-col gap-1.5">
+                            {r.follow_up_actions.map((a, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className="text-xs dark:text-emerald-400 text-emerald-600 shrink-0 font-bold mt-0.5">{i + 1}.</span>
+                                <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed">{a}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* risk indicators so patients know what to watch for */}
+                      {r.risk_indicators?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold dark:text-amber-400 text-amber-600 mb-1.5">Watch For</p>
+                          <div className="flex flex-col gap-1.5">
+                            {r.risk_indicators.map((risk, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className="text-xs dark:text-amber-400 text-amber-600 shrink-0 mt-0.5">⚠</span>
+                                <p className="text-xs dark:text-gray-400 text-gray-500 leading-relaxed">{risk}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>

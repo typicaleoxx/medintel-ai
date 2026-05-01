@@ -12,12 +12,18 @@ class ReportRequest(BaseModel):
     diagnosis: str = Field(..., min_length=1, max_length=2000)
 
 
-# the four sections of a standard soap note produced by the ai
+# the full structured output from the ai: four soap sections plus five intelligence fields
+# new fields default to empty so existing saved records remain valid
 class SOAPReport(BaseModel):
     subjective: str
     objective: str
     assessment: str
     plan: str
+    diagnosis_summary: str = ""
+    key_symptoms: list[str] = []
+    risk_indicators: list[str] = []
+    follow_up_actions: list[str] = []
+    patient_explanation: str = ""
 
 
 # what we send back to the client after generating a report
@@ -25,14 +31,10 @@ class ReportResponse(BaseModel):
     report: SOAPReport
 
 
-# what the doctor sends when saving a report — includes identity and the four soap sections
-class SaveReportRequest(BaseModel):
+# what the doctor sends when saving a report: identity plus all soap and intelligence fields
+class SaveReportRequest(SOAPReport):
     patient_name: str = Field(..., min_length=1, max_length=200)
     doctor_name: str = Field(..., min_length=1, max_length=200)
-    subjective: str
-    objective: str
-    assessment: str
-    plan: str
 
 
 # a report that has been persisted in the database including its id and timestamp
@@ -44,6 +46,11 @@ class SavedReport(BaseModel):
     objective: str
     assessment: str
     plan: str
+    diagnosis_summary: str = ""
+    key_symptoms: list[str] = []
+    risk_indicators: list[str] = []
+    follow_up_actions: list[str] = []
+    patient_explanation: str = ""
     created_at: datetime
 
 

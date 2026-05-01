@@ -1,5 +1,5 @@
 // this file is the doctor interface for entering patient data and generating soap reports
-// it has a three stage progress stepper patient and doctor name fields voice input and a live soap preview
+// progress stepper on top then session info form and a rich multi section soap preview on the right
 
 "use client"
 
@@ -16,7 +16,7 @@ const soapSections: { key: keyof SOAPReport; label: string; desc: string; accent
   { key: "plan", label: "Plan", desc: "treatment", accent: "text-emerald-400" },
 ]
 
-// input fields paired with their soap context label shown in the card header
+// maps each input to its soap context label shown in the card header
 const inputFields = [
   { key: "symptoms", label: "Patient Symptoms", contextLabel: "Subjective Data", placeholder: "Describe the patient's reported symptoms and complaints..." },
   { key: "observations", label: "Clinical Observations", contextLabel: "Objective Findings", placeholder: "Enter objective physical findings and vital trends..." },
@@ -25,7 +25,6 @@ const inputFields = [
 
 const MAX = 1000
 
-// the three workflow stages shown in the progress stepper
 const stages = [
   {
     label: "Clinical Input",
@@ -73,7 +72,7 @@ export default function DoctorPage() {
 
   // recRef holds the active speech recognition instance so we can stop it on demand
   const recRef = useRef<unknown>(null)
-  // voiceBase captures the field value at the moment voice starts so we don't duplicate existing text
+  // voiceBase captures the field value at the moment voice starts so we do not duplicate existing text
   const voiceBase = useRef<string>("")
 
   useEffect(() => {
@@ -83,14 +82,12 @@ export default function DoctorPage() {
   const values: Record<string, string> = { symptoms, observations, diagnosis }
   const setters: Record<string, (v: string) => void> = { symptoms: setSymptoms, observations: setObservations, diagnosis: setDiagnosis }
 
-  // stageIndex drives the progress stepper: 0 input, 1 processing, 2 report ready
   const stageIndex = loading ? 1 : report ? 2 : 0
 
   const lastVisit = dbReports[0]
     ? new Date(dbReports[0].created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : "no visits yet"
 
-  // group saved reports by day for the mini activity chart
   const chartData = useMemo(() => {
     const counts: Record<string, number> = {}
     dbReports.forEach((r) => {
@@ -141,7 +138,6 @@ export default function DoctorPage() {
     try {
       await saveReport(report, patientName, doctorName)
       setSaved(true)
-      // refresh the stats strip so total reports and last visit update immediately
       getReports().then((d) => setDbReports(d.reports)).catch(() => {})
     } catch {
       setError("failed to save. please try again.")
@@ -157,19 +153,13 @@ export default function DoctorPage() {
     setListening(null)
   }
 
-  // uses the browser speech api in continuous mode so words accumulate until the mic is clicked again
+  // continuous mode so words accumulate until the user clicks the mic again to stop
   const startVoice = (fieldKey: string) => {
-    if (listening === fieldKey) {
-      stopVoice()
-      return
-    }
+    if (listening === fieldKey) { stopVoice(); return }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) {
-      setError("voice input is not supported in this browser. try chrome or edge.")
-      return
-    }
+    if (!SR) { setError("voice input is not supported in this browser. try chrome or edge."); return }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rec = new SR() as any
@@ -183,36 +173,23 @@ export default function DoctorPage() {
     setListening(fieldKey)
     setError(null)
 
-    // accumulate all results on top of the value that existed before voice started
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rec.onresult = (e: any) => {
       let transcript = ""
-      for (let i = 0; i < e.results.length; i++) {
-        transcript += e.results[i][0].transcript
-      }
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript
       const prefix = voiceBase.current ? voiceBase.current + " " : ""
       setters[fieldKey]((prefix + transcript).slice(0, MAX))
     }
-
-    rec.onend = () => {
-      recRef.current = null
-      setListening(null)
-    }
-
+    rec.onend = () => { recRef.current = null; setListening(null) }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rec.onerror = (e: any) => {
       recRef.current = null
       setListening(null)
-      if (e.error === "not-allowed") {
-        setError("microphone access denied. allow microphone permission in your browser and try again.")
-      } else if (e.error !== "no-speech") {
-        setError(`voice input error: ${e.error}`)
-      }
+      if (e.error === "not-allowed") setError("microphone access denied. allow microphone permission and try again.")
+      else if (e.error !== "no-speech") setError(`voice input error: ${e.error}`)
     }
 
-    try {
-      rec.start()
-    } catch {
+    try { rec.start() } catch {
       recRef.current = null
       setListening(null)
       setError("could not start voice input. check your microphone permissions.")
@@ -225,7 +202,6 @@ export default function DoctorPage() {
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8 flex flex-col gap-6">
 
-        {/* page title */}
         <div>
           <h1 className="text-2xl font-bold dark:text-white text-gray-900">Clinical Documentation</h1>
           <p className="text-sm dark:text-gray-400 text-gray-500 mt-0.5">
@@ -233,7 +209,7 @@ export default function DoctorPage() {
           </p>
         </div>
 
-        {/* three stage progress stepper showing where you are in the workflow */}
+        {/* three stage progress stepper */}
         <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl px-6 py-4">
           <div className="flex items-center gap-0">
             {stages.map((s, i) => {
@@ -242,22 +218,16 @@ export default function DoctorPage() {
               return (
                 <div key={s.label} className="flex items-center flex-1 last:flex-none">
                   <div className="flex flex-col items-center gap-1.5">
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                        isDone
-                          ? "bg-violet-600 text-white"
-                          : isActive
-                          ? "bg-violet-600/20 border-2 border-violet-500 text-violet-400"
-                          : "dark:bg-white/8 bg-gray-100 dark:text-gray-600 text-gray-400 border dark:border-white/10 border-gray-200"
-                      }`}
-                    >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                      isDone ? "bg-violet-600 text-white" : isActive
+                        ? "bg-violet-600/20 border-2 border-violet-500 text-violet-400"
+                        : "dark:bg-white/8 bg-gray-100 dark:text-gray-600 text-gray-400 border dark:border-white/10 border-gray-200"
+                    }`}>
                       {isDone ? (
                         <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-none stroke-current stroke-2">
                           <polyline points="20,6 9,17 4,12" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                      ) : (
-                        s.icon
-                      )}
+                      ) : s.icon}
                     </div>
                     <span className={`text-xs font-medium whitespace-nowrap ${isActive ? "dark:text-white text-gray-900" : "dark:text-gray-500 text-gray-400"}`}>
                       {s.label}
@@ -272,7 +242,7 @@ export default function DoctorPage() {
           </div>
         </div>
 
-        {/* stats strip: total reports, last visit, and a mini area chart of report activity */}
+        {/* stats strip */}
         <div className="grid grid-cols-3 gap-4">
           <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl px-5 py-4 flex items-center gap-4 card-glow">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center shrink-0">
@@ -306,7 +276,6 @@ export default function DoctorPage() {
             </div>
           </div>
 
-          {/* mini area chart showing report generation activity over time */}
           <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl px-5 py-4 card-glow">
             <p className="text-xs dark:text-gray-500 text-gray-400 mb-2">Report Activity</p>
             {chartData.length > 0 ? (
@@ -336,20 +305,18 @@ export default function DoctorPage() {
           </div>
         </div>
 
-        {/* two column layout: form left, soap preview right */}
+        {/* two column layout */}
         <div className="flex gap-5 flex-1">
 
           {/* left: input form */}
           <div className="flex flex-col gap-4 w-[52%]">
 
-            {/* patient and doctor identity — saved with every report so records are never anonymous */}
+            {/* session info: patient and doctor name saved with every report */}
             <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-violet-500 text-xs">›</span>
                 <span className="text-sm font-semibold dark:text-white text-gray-900">Session Info</span>
-                <span className="text-xs dark:text-gray-600 text-gray-400 dark:bg-white/5 bg-gray-100 px-2 py-0.5 rounded-full border dark:border-white/8 border-gray-200 ml-auto">
-                  required
-                </span>
+                <span className="text-xs dark:text-gray-600 text-gray-400 dark:bg-white/5 bg-gray-100 px-2 py-0.5 rounded-full border dark:border-white/8 border-gray-200 ml-auto">required</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -375,12 +342,9 @@ export default function DoctorPage() {
               </div>
             </div>
 
-            {/* the three clinical input cards */}
+            {/* clinical input cards */}
             {inputFields.map(({ key, label, contextLabel, placeholder }) => (
-              <div
-                key={key}
-                className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-4"
-              >
+              <div key={key} className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-violet-500 text-xs">›</span>
@@ -390,18 +354,11 @@ export default function DoctorPage() {
                     <span className="text-xs dark:text-gray-600 text-gray-400 dark:bg-white/5 bg-gray-100 px-2 py-0.5 rounded-full border dark:border-white/8 border-gray-200">
                       {contextLabel}
                     </span>
-                    <span className="text-xs dark:text-gray-500 text-gray-400">
-                      {values[key].length}/{MAX}
-                    </span>
-                    {/* mic button toggles on/off — red when recording */}
+                    <span className="text-xs dark:text-gray-500 text-gray-400">{values[key].length}/{MAX}</span>
                     <button
                       type="button"
                       onClick={() => startVoice(key)}
-                      className={`transition-colors ${
-                        listening === key
-                          ? "text-red-400 animate-pulse"
-                          : "dark:text-gray-500 text-gray-400 dark:hover:text-white hover:text-gray-700"
-                      }`}
+                      className={`transition-colors ${listening === key ? "text-red-400 animate-pulse" : "dark:text-gray-500 text-gray-400 dark:hover:text-white hover:text-gray-700"}`}
                       aria-label={listening === key ? "stop voice input" : "start voice input"}
                     >
                       <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2">
@@ -422,9 +379,7 @@ export default function DoctorPage() {
             ))}
 
             {error && (
-              <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
-                {error}
-              </div>
+              <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">{error}</div>
             )}
 
             <div className="flex gap-3">
@@ -435,17 +390,9 @@ export default function DoctorPage() {
                 className="flex-1 flex items-center justify-center gap-2 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-semibold text-sm transition-colors"
               >
                 {loading ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    generating...
-                  </>
+                  <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />generating...</>
                 ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2">
-                      <path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" strokeLinejoin="round" />
-                    </svg>
-                    Generate SOAP Report
-                  </>
+                  <><svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" strokeLinejoin="round" /></svg>Generate SOAP Report</>
                 )}
               </button>
               <button
@@ -462,8 +409,8 @@ export default function DoctorPage() {
             </div>
           </div>
 
-          {/* right: soap report preview */}
-          <div className="flex-1 dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-6 flex flex-col">
+          {/* right: rich soap report preview with all intelligence sections */}
+          <div className="flex-1 dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-6 flex flex-col gap-4 overflow-y-auto">
             {!report ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
                 <div className="w-14 h-14 rounded-full bg-gradient-to-br from-violet-500/15 to-purple-600/15 border border-violet-500/20 flex items-center justify-center">
@@ -476,43 +423,96 @@ export default function DoctorPage() {
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4 h-full">
-                <div className="flex items-center justify-between">
+              <>
+                {/* report header */}
+                <div className="flex items-center justify-between shrink-0">
                   <div>
                     <h2 className="text-sm font-semibold dark:text-white text-gray-900">SOAP Report</h2>
-                    {patientName && (
-                      <p className="text-xs dark:text-gray-500 text-gray-400 mt-0.5">
-                        {patientName} · {doctorName}
-                      </p>
-                    )}
+                    {patientName && <p className="text-xs dark:text-gray-500 text-gray-400 mt-0.5">{patientName} · {doctorName}</p>}
                   </div>
-                  <span className="text-xs px-2.5 py-1 dark:bg-green-500/15 bg-green-50 dark:text-green-400 text-green-600 rounded-full border dark:border-green-500/20 border-green-200">
-                    generated
-                  </span>
+                  <span className="text-xs px-2.5 py-1 dark:bg-green-500/15 bg-green-50 dark:text-green-400 text-green-600 rounded-full border dark:border-green-500/20 border-green-200">generated</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 flex-1">
+                {/* diagnosis summary: the ai headline */}
+                {report.diagnosis_summary && (
+                  <div className="dark:bg-violet-600/10 bg-violet-50 border dark:border-violet-500/20 border-violet-200 rounded-xl p-4 shrink-0">
+                    <p className="text-xs font-bold text-violet-500 uppercase tracking-wider mb-1.5">Diagnosis Summary</p>
+                    <p className="text-sm dark:text-white text-gray-900 font-medium leading-snug">{report.diagnosis_summary}</p>
+                  </div>
+                )}
+
+                {/* four soap section cards */}
+                <div className="grid grid-cols-2 gap-3 shrink-0">
                   {soapSections.map(({ key, label, desc, accent }) => (
-                    <div
-                      key={key}
-                      className="dark:bg-[#080810] bg-gray-50 rounded-xl p-4 border dark:border-white/8 border-gray-200 flex flex-col gap-2"
-                    >
+                    <div key={key} className="dark:bg-[#080810] bg-gray-50 rounded-xl p-4 border dark:border-white/8 border-gray-200 flex flex-col gap-2">
                       <div>
                         <span className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{label}</span>
                         <p className="text-xs dark:text-gray-500 text-gray-400">{desc}</p>
                       </div>
-                      <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed line-clamp-5">
-                        {report[key]}
-                      </p>
+                      <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed line-clamp-4">{report[key] as string}</p>
                     </div>
                   ))}
                 </div>
 
+                {/* three intelligence columns: symptoms, risks, follow-up */}
+                <div className="grid grid-cols-3 gap-3 shrink-0">
+                  {/* key symptoms */}
+                  <div className="dark:bg-[#080810] bg-gray-50 rounded-xl p-3 border dark:border-white/8 border-gray-200">
+                    <p className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-2">Key Symptoms</p>
+                    <div className="flex flex-wrap gap-1">
+                      {report.key_symptoms.map((s) => (
+                        <span key={s} className="text-xs px-2 py-0.5 dark:bg-violet-500/15 bg-violet-50 dark:text-violet-300 text-violet-700 rounded-full border dark:border-violet-500/20 border-violet-200">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* risk indicators */}
+                  <div className="dark:bg-[#080810] bg-gray-50 rounded-xl p-3 border dark:border-white/8 border-gray-200">
+                    <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">Risk Indicators</p>
+                    {report.risk_indicators.length === 0 ? (
+                      <p className="text-xs dark:text-gray-600 text-gray-400">none identified</p>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {report.risk_indicators.map((r, i) => (
+                          <div key={i} className="flex items-start gap-1.5">
+                            <span className="text-amber-400 text-xs shrink-0 mt-0.5">⚠</span>
+                            <p className="text-xs dark:text-gray-300 text-gray-600 leading-snug">{r}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* follow-up actions */}
+                  <div className="dark:bg-[#080810] bg-gray-50 rounded-xl p-3 border dark:border-white/8 border-gray-200">
+                    <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Follow-up</p>
+                    <div className="flex flex-col gap-1.5">
+                      {report.follow_up_actions.map((a, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <span className="text-xs dark:text-emerald-400 text-emerald-600 shrink-0 mt-0.5 font-bold">{i + 1}.</span>
+                          <p className="text-xs dark:text-gray-300 text-gray-600 leading-snug">{a}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* patient explanation: plain english for the patient */}
+                {report.patient_explanation && (
+                  <div className="dark:bg-blue-600/10 bg-blue-50 border dark:border-blue-500/20 border-blue-200 rounded-xl p-4 shrink-0">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1.5">Patient Explanation</p>
+                    <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed">{report.patient_explanation}</p>
+                  </div>
+                )}
+
+                {/* save button */}
                 <button
                   type="button"
                   onClick={handleSave}
                   disabled={saving || saved}
-                  className={`w-full py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
+                  className={`w-full py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 shrink-0 ${
                     saved
                       ? "dark:bg-green-500/15 bg-green-50 dark:text-green-400 text-green-600 dark:border-green-500/20 border-green-200 border"
                       : "bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white"
@@ -520,7 +520,7 @@ export default function DoctorPage() {
                 >
                   {saved ? "✓ saved to database" : saving ? "saving..." : "Save Report"}
                 </button>
-              </div>
+              </>
             )}
           </div>
         </div>
