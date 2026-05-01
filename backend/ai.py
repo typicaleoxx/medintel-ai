@@ -4,15 +4,18 @@
 import os
 import json
 import google.generativeai as genai
+from dotenv import load_dotenv
 from schemas import SOAPReport
 
+# load env vars here too so the api key is available regardless of import order
+load_dotenv()
 
 # configure the gemini client once at import time using the api key from environment
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# use gemini 2.0 flash because it is fast and free within standard quota limits
+# use gemini 1.5 flash because it has a generous free tier and is fast enough for this use case
 model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash",
+    model_name="gemini-1.5-flash",
     generation_config=genai.GenerationConfig(
         response_mime_type="application/json",
     ),
