@@ -3,23 +3,16 @@
 
 import os
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from schemas import SOAPReport
 
 # load env vars here too so the api key is available regardless of import order
 load_dotenv()
 
-# configure the gemini client once at import time using the api key from environment
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-# use gemini 1.5 flash because it has a generous free tier and is fast enough for this use case
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    generation_config=genai.GenerationConfig(
-        response_mime_type="application/json",
-    ),
-)
+# create the gemini client using the api key from environment
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def generate_soap_report(symptoms: str, observations: str, diagnosis: str) -> SOAPReport:
@@ -43,8 +36,14 @@ return a json object with exactly these four keys and no other text:
 
 write each section as a clear professional clinical paragraph. do not use bullet points inside the values."""
 
-    # send the prompt to gemini and wait for the response
-    response = model.generate_content(prompt)
+    # send the prompt to gemini and request json output so the response is always parseable
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
+    )
 
     # parse the json string returned by the model into our pydantic model for type safety
     data = json.loads(response.text)
