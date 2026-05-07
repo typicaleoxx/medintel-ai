@@ -1,7 +1,8 @@
 // this file contains all functions that talk to the fastapi backend
 // every api call lives here so pages stay clean and we only change urls in one place
 
-import type { SOAPReport } from "./types"
+import type { ChatMessage, SOAPReport } from "./types"
+import { getDemoHeaders } from "./demoSession"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -13,7 +14,7 @@ export async function generateReport(
 ) {
   const res = await fetch(`${API_URL}/api/generate-report`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getDemoHeaders() },
     body: JSON.stringify({ symptoms, observations, diagnosis }),
   })
   if (!res.ok) throw new Error("failed to generate report")
@@ -24,7 +25,7 @@ export async function generateReport(
 export async function saveReport(report: SOAPReport, patientName: string, doctorName: string) {
   const res = await fetch(`${API_URL}/api/save-report`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getDemoHeaders() },
     body: JSON.stringify({
       ...report,
       patient_name: patientName,
@@ -37,17 +38,19 @@ export async function saveReport(report: SOAPReport, patientName: string, doctor
 
 // fetch the most recent reports for the patient page
 export async function getReports() {
-  const res = await fetch(`${API_URL}/api/reports`)
+  const res = await fetch(`${API_URL}/api/reports`, {
+    headers: getDemoHeaders(),
+  })
   if (!res.ok) throw new Error("failed to fetch reports")
   return res.json()
 }
 
 // send a patient question to the ai chat endpoint
-export async function chatWithAI(question: string) {
+export async function chatWithAI(question: string, history: ChatMessage[] = []) {
   const res = await fetch(`${API_URL}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    headers: { "Content-Type": "application/json", ...getDemoHeaders() },
+    body: JSON.stringify({ question, history: history.slice(-6) }),
   })
   if (!res.ok) throw new Error("failed to get response")
   return res.json()

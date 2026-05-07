@@ -2,11 +2,11 @@
 
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import Navbar from "@/components/Navbar"
 import { getReports, chatWithAI } from "@/lib/api"
-import type { SavedReport } from "@/lib/types"
+import type { ChatMessage, SavedReport } from "@/lib/types"
 
 const suggestions = [
   "What is my diagnosis?",
@@ -14,9 +14,11 @@ const suggestions = [
   "What symptoms were recorded?",
 ]
 
-interface Message {
-  role: "user" | "assistant"
-  text: string
+interface Insight {
+  kind: "condition" | "trend" | "warning"
+  label: string
+  value: string
+  tone: string
 }
 
 // group reports by day so the area chart shows visit frequency over time
@@ -29,13 +31,79 @@ function buildChartData(reports: SavedReport[]) {
   return Object.entries(counts).map(([date, count]) => ({ date, count })).slice(-7)
 }
 
+function buildInsights(reports: SavedReport[]): Insight[] {
+  if (reports.length === 0) return []
+
+  const latest = reports[0]
+  const symptomCounts: Record<string, number> = {}
+  reports.forEach((report) => {
+    report.key_symptoms?.forEach((symptom) => {
+      const key = symptom.trim().toLowerCase()
+      if (key) symptomCounts[key] = (symptomCounts[key] || 0) + 1
+    })
+  })
+
+  const recurringSymptoms = Object.entries(symptomCounts)
+    .filter(([, count]) => count > 1)
+    .map(([symptom]) => symptom)
+    .slice(0, 3)
+
+  const insights: Insight[] = []
+
+  const condition = latest.what_you_have || latest.diagnosis_summary
+  if (condition) {
+    insights.push({
+      kind: "condition",
+      label: "Important Condition",
+      value: condition,
+      tone: "dark:bg-blue-500/10 bg-blue-50 dark:border-blue-500/20 border-blue-200 dark:text-blue-300 text-blue-700",
+    })
+  }
+
+  if (recurringSymptoms.length > 0) {
+    insights.push({
+      kind: "trend",
+      label: "Trend",
+      value: `Recurring symptoms across visits: ${recurringSymptoms.join(", ")}`,
+      tone: "dark:bg-violet-500/10 bg-violet-50 dark:border-violet-500/20 border-violet-200 dark:text-violet-300 text-violet-700",
+    })
+  } else if (latest.key_symptoms?.length > 0) {
+    insights.push({
+      kind: "trend",
+      label: "Latest Symptoms",
+      value: latest.key_symptoms.slice(0, 4).join(", "),
+      tone: "dark:bg-violet-500/10 bg-violet-50 dark:border-violet-500/20 border-violet-200 dark:text-violet-300 text-violet-700",
+    })
+  }
+
+  if (latest.risk_indicators?.length > 0) {
+    insights.push({
+      kind: "warning",
+      label: "Warning",
+      value: latest.risk_indicators.slice(0, 2).join("; "),
+      tone: "dark:bg-amber-500/10 bg-amber-50 dark:border-amber-500/20 border-amber-200 dark:text-amber-300 text-amber-700",
+    })
+  } else if (latest.follow_up_actions?.length > 0) {
+    insights.push({
+      kind: "warning",
+      label: "Next Step",
+      value: latest.follow_up_actions[0],
+      tone: "dark:bg-emerald-500/10 bg-emerald-50 dark:border-emerald-500/20 border-emerald-200 dark:text-emerald-300 text-emerald-700",
+    })
+  }
+
+  return insights.slice(0, 3)
+}
+
 export default function PatientPage() {
   const [reports, setReports] = useState<SavedReport[]>([])
   const [reportsError, setReportsError] = useState(false)
   const [selectedReport, setSelectedReport] = useState<SavedReport | null>(null)
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<string[]>(suggestions)
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
+  const [simpleLanguage, setSimpleLanguage] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -53,11 +121,16 @@ export default function PatientPage() {
     const question = (text ?? input).trim()
     if (!question || sending) return
     setInput("")
+    const history = messages.slice(-6)
     setMessages((prev) => [...prev, { role: "user", text: question }])
+    setFollowUpSuggestions([])
     setSending(true)
     try {
-      const data = await chatWithAI(question)
+      const data = await chatWithAI(question, history)
       setMessages((prev) => [...prev, { role: "assistant", text: data.answer }])
+      if (Array.isArray(data.follow_up_suggestions) && data.follow_up_suggestions.length > 0) {
+        setFollowUpSuggestions(data.follow_up_suggestions)
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -86,12 +159,14 @@ export default function PatientPage() {
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
   const chartData = buildChartData(reports)
+  const insights = useMemo(() => buildInsights(reports), [reports])
 
   return (
     <div className="min-h-screen dark:bg-[#080810] bg-gray-50 flex flex-col">
       <Navbar />
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8 flex flex-col gap-6">
+      <main className="flex-1 lg:pl-64 pt-16 w-full">
+        <div className="w-full px-5 lg:px-8 py-6 flex flex-col gap-6">
 
         {/* welcome hero strip */}
         <div className="flex items-center justify-between">
@@ -100,9 +175,18 @@ export default function PatientPage() {
             <p className="text-sm dark:text-gray-400 text-gray-500 mt-0.5">{today}</p>
           </div>
           {reports.length > 0 && (
-            <span className="text-xs px-3 py-1.5 dark:bg-violet-500/15 bg-violet-50 dark:text-violet-400 text-violet-600 rounded-full border dark:border-violet-500/20 border-violet-200 font-medium">
-              {reports.length} records on file
-            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSimpleLanguage((v) => !v)}
+                className="text-xs px-3 py-1.5 dark:bg-white/8 bg-white dark:text-gray-300 text-gray-600 rounded-full border dark:border-white/10 border-gray-200 font-medium hover:border-violet-500/30 transition-colors"
+              >
+                {simpleLanguage ? "Simple language" : "Clinical detail"}
+              </button>
+              <span className="text-xs px-3 py-1.5 dark:bg-violet-500/15 bg-violet-50 dark:text-violet-400 text-violet-600 rounded-full border dark:border-violet-500/20 border-violet-200 font-medium">
+                {reports.length} records on file
+              </span>
+            </div>
           )}
         </div>
 
@@ -198,11 +282,25 @@ export default function PatientPage() {
           )
         })()}
 
+        {/* instant insight highlights derived from saved report fields, no extra ai call */}
+        {insights.length > 0 && (
+          <div className="grid grid-cols-3 gap-4">
+            {insights.map((insight) => (
+              <div key={`${insight.kind}-${insight.label}`} className={`border rounded-xl px-5 py-4 ${insight.tone}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider">{insight.label}</span>
+                </div>
+                <p className="text-sm font-semibold leading-snug line-clamp-3">{insight.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* two column layout: report list left, chat right */}
-        <div className="flex gap-5 flex-1 min-h-0 chat-panel-height">
+        <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(390px,0.85fr)_280px] gap-5 flex-1 min-h-0 chat-panel-height">
 
           {/* left: clinical reports list */}
-          <div className="w-[38%] flex flex-col dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl overflow-hidden">
+          <div className="flex flex-col dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b dark:border-white/8 border-gray-200 shrink-0">
               <div className="flex items-center gap-2">
                 <svg viewBox="0 0 24 24" className="w-4 h-4 dark:text-gray-400 text-gray-500 fill-none stroke-current stroke-2">
@@ -259,8 +357,15 @@ export default function PatientPage() {
                       completed
                     </span>
                   </div>
+                  {(r.diagnosis_summary || r.what_you_have) && (
+                    <div className="pl-8 mb-2 flex flex-wrap gap-1.5">
+                      <span className="text-xs px-2 py-0.5 rounded-full dark:bg-blue-500/15 bg-blue-50 dark:text-blue-300 text-blue-700 border dark:border-blue-500/20 border-blue-200">
+                        {simpleLanguage ? r.what_you_have || r.diagnosis_summary : r.diagnosis_summary || r.what_you_have}
+                      </span>
+                    </div>
+                  )}
                   <p className="text-xs dark:text-gray-400 text-gray-500 line-clamp-2 leading-relaxed pl-8">
-                    {r.subjective}
+                    {simpleLanguage ? r.what_this_means || r.patient_explanation || r.subjective : r.subjective}
                   </p>
 
                   {selectedReport?.id === r.id && (
@@ -270,7 +375,7 @@ export default function PatientPage() {
                       {/* patient understanding section — plain language, no jargon */}
                       {(r.what_you_have || r.what_this_means) && (
                         <div className="dark:bg-violet-500/10 bg-violet-50 border dark:border-violet-500/20 border-violet-200 rounded-lg p-3 flex flex-col gap-2">
-                          <p className="text-xs font-bold text-violet-500 uppercase tracking-wider">Your Health Summary</p>
+                          <p className="text-xs font-bold text-violet-500 uppercase tracking-wider">{simpleLanguage ? "Your Health Summary" : "Patient Summary"}</p>
                           {r.what_you_have && (
                             <p className="text-xs font-semibold dark:text-white text-gray-900 leading-snug">{r.what_you_have}</p>
                           )}
@@ -282,7 +387,7 @@ export default function PatientPage() {
 
                       {/* key takeaways — numbered points the patient must remember */}
                       {r.key_takeaways?.length > 0 && (
-                        <div>
+                        <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-lg p-3">
                           <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Key Takeaways</p>
                           <div className="flex flex-col gap-1.5">
                             {r.key_takeaways.map((t, i) => (
@@ -297,7 +402,7 @@ export default function PatientPage() {
 
                       {/* questions to ask at the next visit */}
                       {r.questions_to_ask?.length > 0 && (
-                        <div>
+                        <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-lg p-3">
                           <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Questions to Ask Your Doctor</p>
                           <div className="flex flex-col gap-1.5">
                             {r.questions_to_ask.map((q, i) => (
@@ -312,7 +417,7 @@ export default function PatientPage() {
 
                       {/* follow-up actions checklist */}
                       {r.follow_up_actions?.length > 0 && (
-                        <div>
+                        <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-lg p-3">
                           <p className="text-xs font-semibold dark:text-gray-400 text-gray-500 mb-1.5">Follow-up Actions</p>
                           <div className="flex flex-col gap-1.5">
                             {r.follow_up_actions.map((a, i) => (
@@ -327,7 +432,7 @@ export default function PatientPage() {
 
                       {/* risk watch list */}
                       {r.risk_indicators?.length > 0 && (
-                        <div>
+                        <div className="dark:bg-amber-500/10 bg-amber-50 border dark:border-amber-500/20 border-amber-200 rounded-lg p-3">
                           <p className="text-xs font-semibold dark:text-amber-400 text-amber-600 mb-1.5">Watch For</p>
                           <div className="flex flex-col gap-1.5">
                             {r.risk_indicators.map((risk, i) => (
@@ -347,7 +452,7 @@ export default function PatientPage() {
           </div>
 
           {/* right: ai chat panel */}
-          <div className="flex-1 flex flex-col dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl overflow-hidden">
+          <div className="flex flex-col dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl overflow-hidden">
 
             <div className="flex items-center justify-between px-5 py-4 border-b dark:border-white/8 border-gray-200 shrink-0">
               <div className="flex items-center gap-3">
@@ -382,7 +487,7 @@ export default function PatientPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap justify-center gap-2 mt-1">
-                    {suggestions.map((s) => (
+                    {followUpSuggestions.map((s) => (
                       <button
                         type="button"
                         key={s}
@@ -409,6 +514,20 @@ export default function PatientPage() {
                       </div>
                     </div>
                   ))}
+                  {!sending && followUpSuggestions.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pl-1">
+                      {followUpSuggestions.map((s) => (
+                        <button
+                          type="button"
+                          key={s}
+                          onClick={() => handleSend(s)}
+                          className="px-3 py-1.5 text-xs dark:bg-white/8 bg-gray-100 dark:hover:bg-violet-500/15 hover:bg-violet-50 dark:text-gray-300 text-gray-600 dark:hover:text-violet-300 hover:text-violet-700 rounded-full border dark:border-white/10 border-gray-200 dark:hover:border-violet-500/30 hover:border-violet-200 transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {sending && (
                     <div className="flex justify-start">
                       <div className="dark:bg-[#080810] bg-gray-100 dark:border-white/8 border-gray-200 border px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center">
@@ -455,10 +574,37 @@ export default function PatientPage() {
               </div>
             </div>
           </div>
+
+          <aside className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-5 flex flex-col gap-4 overflow-y-auto">
+            <div>
+              <p className="text-xs font-bold text-violet-500 uppercase tracking-wider">Care Snapshot</p>
+              <h2 className="text-sm font-semibold dark:text-white text-gray-900 mt-1">Important Signals</h2>
+            </div>
+            {insights.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                {insights.map((insight) => (
+                  <div key={`rail-${insight.kind}-${insight.label}`} className={`border rounded-xl p-4 ${insight.tone}`}>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-1">{insight.label}</p>
+                    <p className="text-sm font-semibold leading-snug">{insight.value}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+                <p className="text-sm dark:text-gray-400 text-gray-500">No report highlights yet.</p>
+              </div>
+            )}
+            <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+              <p className="text-xs dark:text-gray-500 text-gray-400 mb-2">Reading Mode</p>
+              <p className="text-sm font-semibold dark:text-white text-gray-900">{simpleLanguage ? "Simplified" : "Clinical"}</p>
+              <p className="text-xs dark:text-gray-500 text-gray-400 mt-1">Toggle from the header to change report summaries.</p>
+            </div>
+          </aside>
+        </div>
         </div>
       </main>
 
-      <footer className="border-t dark:border-white/8 border-gray-200 py-4 px-6">
+      <footer className="lg:pl-64 border-t dark:border-white/8 border-gray-200 py-4 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <span className="text-xs dark:text-gray-600 text-gray-400">MedIntel MVP — AI Clinical Documentation Platform</span>
           <span className="text-xs dark:text-gray-600 text-gray-400">Powered by Gemini · Neon · FastAPI · Next.js</span>

@@ -15,6 +15,20 @@ load_dotenv()
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+# --- simple in-memory caches to reduce prompt size and repeated work ---
+import time
+import hashlib
+from typing import Optional
+
+ENRICHED_CACHE: dict = {}
+# cache entry: { key: {"reports_sig": str, "context": str, "insights": dict, "ts": float} }
+
+SESSION_MEMORY: dict = {}
+# per-session short memory store (keeps recent messages for a session)
+
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "3000"))
+MAX_SESSION_MESSAGES = int(os.getenv("MAX_SESSION_MESSAGES", "6"))
+
 
 # ── prompt builder ────────────────────────────────────────────────────────────
 
@@ -184,10 +198,18 @@ def _fmt_date(report: dict) -> str:
     return str(ts)[:10]
 
 
+def _compact_text(value: str, limit: int = 220) -> str:
+    """trim long report fields so chat prompts stay fast and predictable"""
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
 def build_enriched_context(reports: list[dict]) -> str:
     """
-    transforms raw reports into a structured signal-focused context block.
-    detects recurring symptoms, deduplicates risks, and builds a temporal timeline.
+    transforms raw reports into a compact signal-focused context block.
+    detects recurring symptoms and deduplicates risks without sending full reports.
     """
     if not reports:
         return ""
@@ -222,50 +244,137 @@ def build_enriched_context(reports: list[dict]) -> str:
 
     lines: list[str] = []
     lines.append(f"Patient: {patient_name}")
-    lines.append(f"Visits on record: {len(reports)}  |  Date range: {date_range}")
+    lines.append(f"Visits: {len(reports)} | Date range: {date_range}")
 
     if recurring:
-        lines.append(
-            f"\nRecurring symptoms across visits (likely unresolved or chronic):\n  {', '.join(recurring)}"
-        )
+        lines.append(f"Recurring symptoms: {', '.join(recurring)}")
 
     if new_this_visit:
-        lines.append(f"\nNew symptoms (current visit only):\n  {', '.join(new_this_visit)}")
+        lines.append(f"New symptoms in latest visit: {', '.join(new_this_visit)}")
 
     if unique_risks:
-        lines.append("\nCumulative risk indicators (across all visits):")
-        for risk in unique_risks:
-            lines.append(f"  • {risk}")
+        lines.append(f"Warnings/risk indicators: {'; '.join(unique_risks[:5])}")
 
     if latest_followup:
-        lines.append("\nCurrent follow-up plan:")
-        for i, action in enumerate(latest_followup, 1):
-            lines.append(f"  {i}. {action}")
+        lines.append(f"Latest follow-up plan: {'; '.join(latest_followup[:5])}")
 
-    lines.append("\nVisit timeline (oldest to newest):")
+    lines.append("Visit timeline, oldest to newest:")
     for r in reversed(reports):
         symptoms = _to_list(r.get("key_symptoms"))
-        explanation = r.get("patient_explanation", "")
-        lines.append(f"\n  [{_fmt_date(r)}]")
-        lines.append(f"  Diagnosis: {r.get('diagnosis_summary') or r.get('assessment', '')[:120]}")
+        explanation = _compact_text(r.get("patient_explanation", ""), 180)
+        lines.append(f"- {_fmt_date(r)}")
+        lines.append(f"  Diagnosis: {_compact_text(r.get('diagnosis_summary') or r.get('assessment', ''), 160)}")
         if symptoms:
-            lines.append(f"  Symptoms: {', '.join(symptoms)}")
+            lines.append(f"  Symptoms: {', '.join(symptoms[:6])}")
         if explanation:
             lines.append(f"  Plain summary: {explanation}")
 
     latest = reports[0]
-    lines.append(f"\nLatest clinical details ({_fmt_date(latest)}):")
-    lines.append(f"  Assessment: {latest.get('assessment', '')}")
-    lines.append(f"  Treatment plan: {latest.get('plan', '')}")
+    lines.append(f"Latest assessment: {_compact_text(latest.get('assessment', ''), 260)}")
+    lines.append(f"Latest treatment plan: {_compact_text(latest.get('plan', ''), 260)}")
 
     return "\n".join(lines)
 
 
-# ── patient chat (phase 3 prompt structure) ───────────────────────────────────
+def _reports_signature(reports: list[dict]) -> str:
+    key_items = []
+    for r in reports:
+        rid = r.get("id") or r.get("report_id") or r.get("created_at")
+        ts = r.get("created_at")
+        key_items.append(f"{rid}:{str(ts)}")
+    raw = "|".join(key_items)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-def answer_patient_question(question: str, reports: list[dict]) -> str:
-    enriched_context = build_enriched_context(reports)
+
+def get_enriched_context_with_cache(reports: list[dict]) -> tuple[str, dict]:
+    """Return (context_text, insights_dict) using a small cache keyed by reports signature."""
+    sig = _reports_signature(reports)
+    cache = ENRICHED_CACHE.get("default")
+    if cache and cache.get("reports_sig") == sig:
+        return cache.get("context", ""), cache.get("insights", {})
+
+    context = build_enriched_context(reports)
+    if len(context) > MAX_CONTEXT_CHARS:
+        context = context[-MAX_CONTEXT_CHARS:]
+
+    insights = extract_insights(reports)
+
+    ENRICHED_CACHE["default"] = {"reports_sig": sig, "context": context, "insights": insights, "ts": time.time()}
+    return context, insights
+
+
+# ── patient chat (phase 3 prompt structure, phase 6 history + suggestions) ────
+
+def extract_insights(reports: list[dict]) -> dict:
+    """
+    extracts important conditions, trends, and warnings from saved structured fields.
+    this avoids an extra model call while keeping highlights grounded in stored data.
+    """
+    if not reports:
+        return {"important_conditions": [], "trends": [], "warnings": []}
+
+    latest = reports[0]
+    important_conditions = []
+    latest_condition = latest.get("what_you_have") or latest.get("diagnosis_summary")
+    if latest_condition:
+        important_conditions.append(latest_condition)
+
+    for report in reports[1:]:
+        condition = report.get("diagnosis_summary")
+        if condition and condition not in important_conditions:
+            important_conditions.append(condition)
+        if len(important_conditions) >= 3:
+            break
+
+    symptom_freq: Counter = Counter()
+    for report in reports:
+        for symptom in _to_list(report.get("key_symptoms")):
+            key = symptom.lower().strip()
+            if key:
+                symptom_freq[key] += 1
+
+    recurring = [symptom for symptom, count in symptom_freq.items() if count > 1]
+    trends = []
+    if recurring:
+        trends.append(f"Recurring symptoms across visits: {', '.join(recurring[:4])}")
+    elif _to_list(latest.get("key_symptoms")):
+        trends.append(f"Latest symptoms: {', '.join(_to_list(latest.get('key_symptoms'))[:4])}")
+
+    warnings = []
+    seen_warnings = set()
+    for report in reports:
+        for warning in _to_list(report.get("risk_indicators")):
+            key = warning.lower().strip()
+            if key and key not in seen_warnings:
+                seen_warnings.add(key)
+                warnings.append(warning)
+        if len(warnings) >= 4:
+            break
+
+    if not warnings and _to_list(latest.get("follow_up_actions")):
+        warnings.append(f"Follow up: {_to_list(latest.get('follow_up_actions'))[0]}")
+
+    return {
+        "important_conditions": important_conditions[:3],
+        "trends": trends[:3],
+        "warnings": warnings[:4],
+    }
+
+
+def answer_patient_question(
+    question: str,
+    reports: list[dict],
+    history: list[dict] = None,
+    session_id: str | None = None,
+) -> dict:
+    enriched_context, _derived_insights = get_enriched_context_with_cache(reports)
     patient_name = reports[0].get("patient_name", "the patient") if reports else "the patient"
+    merged_history = []
+    if session_id and session_id in SESSION_MEMORY:
+        merged_history.extend(SESSION_MEMORY.get(session_id, [])[-MAX_SESSION_MESSAGES:])
+    if history:
+        merged_history.extend(history[-MAX_SESSION_MESSAGES:])
+    short_history = merged_history[-MAX_SESSION_MESSAGES:]
 
     role = _Section("ROLE", f"""
 You are a compassionate patient health assistant for {patient_name}.
@@ -280,6 +389,21 @@ Recurring symptoms, risk indicators, follow-up plans, and visit timelines are in
 {enriched_context}
 """)
 
+    # include prior turns so the model can give contextually consistent follow-up answers
+    history_section = None
+    if short_history:
+        history_lines = []
+        for msg in short_history:
+            label = "Patient" if msg.get("role") == "user" else "Assistant"
+            history_lines.append(f"{label}: {_compact_text(msg.get('text', ''), 180)}")
+        history_section = _Section("CONVERSATION HISTORY", f"""
+These messages were exchanged earlier in this session.
+Use them to understand what has already been asked and answered so you stay consistent
+and do not repeat information the patient already received.
+
+{chr(10).join(history_lines)}
+""")
+
     task = _Section("TASK", f"""
 Answer the following question using only the information in the context above.
 Your answer must be accurate, concise, and easy for a non-medical person to understand.
@@ -288,43 +412,84 @@ Question: {question}
 """)
 
     response_format = _Section("RESPONSE FORMAT", """
-- Lead with a direct answer in the first sentence
-- Use 1 to 3 short paragraphs
-- If a recurring symptom pattern is relevant to the question, mention it explicitly
-- If a risk indicator is relevant, always include it
-- If a follow-up action addresses what the patient is asking, highlight it at the end
+Return ONLY a valid JSON object with exactly these two keys:
+
+  answer               (string)         your response to the patient's question in 1-3 short paragraphs.
+                                         Lead with a direct answer in the first sentence.
+                                         Mention recurring symptoms if relevant.
+                                         Include any risk indicators that apply.
+                                         Highlight a follow-up action if it directly addresses the question.
+
+  follow_up_suggestions (array<string>) exactly 2-3 natural follow-up questions the patient would logically
+                                         ask next, based on this question and answer. Each must be under
+                                         12 words. Must be answerable from the available records.
+                                         Do not repeat questions already in the conversation history.
+
+No markdown. No extra keys. No text outside the JSON object.
 """)
 
     constraints = _Section("CONSTRAINTS", """
 - You MUST only use facts that appear in the context above
-- If information is not in the context, respond with exactly: "I don't have that information in your available records."
+- If information is not in the context, set answer to exactly: "I don't have that information in your available records."
 - Do not recommend treatments, medications, or dosages not documented in the records
 - Do not infer a diagnosis not explicitly stated in the records
 - Do not use phrases like "I think" or "possibly" unless noting a differential that appears in the records
 - Do not include general medical advice ungrounded in these specific records
 - Never contradict information that is present in the context
+- If the question refers to "that", "it", "previous", or similar wording, resolve it from the conversation history when possible
 """)
 
-    prompt = _build(role, context, task, response_format, constraints)
+    sections = [role, context]
+    if history_section:
+        sections.append(history_section)
+    sections += [task, response_format, constraints]
+
+    prompt = _build(*sections)
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
 
-    answer = response.text.strip()
+    try:
+        data = json.loads(response.text)
+        answer = data.get("answer", "").strip()
+        follow_up = data.get("follow_up_suggestions", [])
+        if not isinstance(follow_up, list):
+            follow_up = []
+    except (json.JSONDecodeError, AttributeError):
+        answer = response.text.strip()
+        follow_up = []
 
     # phase 5: block responses that contain hallucinated or out-of-scope medical advice
     safety = check_chat_response(answer)
     if not safety.safe:
-        # return a safe fallback rather than surfacing the unsafe answer to the patient
         answer = (
             "I can only answer based on information in your medical records. "
             "I wasn't able to give a reliable answer to this question from the available data. "
             "Please speak with your doctor directly."
         )
+        follow_up = []
 
-    # append emergency disclaimer if the response mentions emergency-level symptoms
     answer = append_emergency_disclaimer_if_needed(answer)
+    asked_questions = {
+        msg.get("text", "").strip().lower()
+        for msg in short_history
+        if msg.get("role") == "user"
+    }
+    asked_questions.add(question.strip().lower())
+    follow_up = [
+        str(item).strip()
+        for item in follow_up
+        if str(item).strip() and str(item).strip().lower() not in asked_questions
+    ][:3]
 
-    return answer
+    # update short session memory with latest turn
+    if session_id:
+        SESSION_MEMORY.setdefault(session_id, [])
+        SESSION_MEMORY[session_id].append({"role": "user", "text": question})
+        SESSION_MEMORY[session_id].append({"role": "assistant", "text": answer})
+        SESSION_MEMORY[session_id] = SESSION_MEMORY[session_id][-MAX_SESSION_MESSAGES:]
+
+    return {"answer": answer, "follow_up_suggestions": follow_up}

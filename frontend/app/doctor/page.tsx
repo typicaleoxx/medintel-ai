@@ -9,18 +9,18 @@ import Navbar from "@/components/Navbar"
 import { generateReport, saveReport, getReports } from "@/lib/api"
 import type { SOAPReport, SavedReport } from "@/lib/types"
 
-const soapSections: { key: keyof SOAPReport; label: string; desc: string; accent: string }[] = [
-  { key: "subjective", label: "Subjective", desc: "patient reported", accent: "text-violet-400" },
-  { key: "objective", label: "Objective", desc: "clinical findings", accent: "text-teal-400" },
-  { key: "assessment", label: "Assessment", desc: "diagnosis", accent: "text-amber-400" },
-  { key: "plan", label: "Plan", desc: "treatment", accent: "text-emerald-400" },
+const soapSections: { key: keyof SOAPReport; label: string; desc: string; accent: string; badge: string }[] = [
+  { key: "subjective", label: "Subjective", desc: "patient reported", accent: "text-violet-400", badge: "S" },
+  { key: "objective", label: "Objective", desc: "clinical findings", accent: "text-teal-400", badge: "O" },
+  { key: "assessment", label: "Assessment", desc: "diagnosis", accent: "text-amber-400", badge: "A" },
+  { key: "plan", label: "Plan", desc: "treatment", accent: "text-emerald-400", badge: "P" },
 ]
 
 // maps each input to its soap context label shown in the card header
 const inputFields = [
-  { key: "symptoms", label: "Patient Symptoms", contextLabel: "Subjective Data", placeholder: "Describe the patient's reported symptoms and complaints..." },
-  { key: "observations", label: "Clinical Observations", contextLabel: "Objective Findings", placeholder: "Enter objective physical findings and vital trends..." },
-  { key: "diagnosis", label: "Initial Assessment & Diagnosis", contextLabel: "Assessment & Plan", placeholder: "Outline the diagnostic hypothesis and treatment plan..." },
+  { key: "symptoms", label: "Patient Symptoms", short: "S", contextLabel: "Subjective Data", placeholder: "Describe the patient's reported symptoms and complaints..." },
+  { key: "observations", label: "Clinical Observations", short: "O", contextLabel: "Objective Findings", placeholder: "Enter objective physical findings and vital trends..." },
+  { key: "diagnosis", label: "Initial Assessment & Diagnosis", short: "A", contextLabel: "Assessment & Plan", placeholder: "Outline the diagnostic hypothesis and treatment plan..." },
 ]
 
 const MAX = 1000
@@ -69,6 +69,7 @@ export default function DoctorPage() {
   const [saved, setSaved] = useState(false)
   const [listening, setListening] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lastAction, setLastAction] = useState<string | null>(null)
 
   // recRef holds the active speech recognition instance so we can stop it on demand
   const recRef = useRef<unknown>(null)
@@ -83,6 +84,14 @@ export default function DoctorPage() {
   const setters: Record<string, (v: string) => void> = { symptoms: setSymptoms, observations: setObservations, diagnosis: setDiagnosis }
 
   const stageIndex = loading ? 1 : report ? 2 : 0
+  const clinicalCompleteness = Math.round(
+    ((patientName.trim() ? 1 : 0) + (doctorName.trim() ? 1 : 0) + (symptoms.trim() ? 1 : 0) + (observations.trim() ? 1 : 0) + (diagnosis.trim() ? 1 : 0)) / 5 * 100
+  )
+  const livePreview = [
+    symptoms && `Subjective: ${symptoms}`,
+    observations && `Objective: ${observations}`,
+    diagnosis && `Assessment: ${diagnosis}`,
+  ].filter(Boolean)
 
   const lastVisit = dbReports[0]
     ? new Date(dbReports[0].created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -113,6 +122,7 @@ export default function DoctorPage() {
     try {
       const data = await generateReport(symptoms, observations, diagnosis)
       setReport(data.report)
+      setLastAction("Report generated and ready for review.")
     } catch {
       setError("could not reach the backend. make sure the server is running.")
     } finally {
@@ -129,6 +139,7 @@ export default function DoctorPage() {
     setReport(null)
     setSaved(false)
     setError(null)
+    setLastAction(null)
     stopVoice()
   }
 
@@ -138,12 +149,24 @@ export default function DoctorPage() {
     try {
       await saveReport(report, patientName, doctorName)
       setSaved(true)
+      setLastAction("Report saved to this demo session.")
       getReports().then((d) => setDbReports(d.reports)).catch(() => {})
     } catch {
       setError("failed to save. please try again.")
     } finally {
       setSaving(false)
     }
+  }
+
+  const updateReportField = (key: keyof SOAPReport, value: string) => {
+    setReport((current) => current ? { ...current, [key]: value } : current)
+    setSaved(false)
+  }
+
+  const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>, setter: (v: string) => void) => {
+    setter(e.target.value.slice(0, MAX))
+    e.target.style.height = "auto"
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 220)}px`
   }
 
   const stopVoice = () => {
@@ -200,13 +223,20 @@ export default function DoctorPage() {
     <div className="min-h-screen dark:bg-[#080810] bg-gray-50 flex flex-col">
       <Navbar />
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8 flex flex-col gap-6">
+      <main className="flex-1 lg:pl-64 pt-16 w-full">
+        <div className="w-full px-5 lg:px-8 py-6 flex flex-col gap-6">
 
-        <div>
-          <h1 className="text-2xl font-bold dark:text-white text-gray-900">Clinical Documentation</h1>
-          <p className="text-sm dark:text-gray-400 text-gray-500 mt-0.5">
-            Enter patient data to generate a structured SOAP report using AI.
-          </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold dark:text-white text-gray-900">Clinical Documentation</h1>
+            <p className="text-sm dark:text-gray-400 text-gray-500 mt-0.5">
+              Fast SOAP generation with editable AI output and session-scoped demo data.
+            </p>
+          </div>
+          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl dark:bg-white/5 bg-white border dark:border-white/8 border-gray-200">
+            <span className="text-xs dark:text-gray-500 text-gray-400">Readiness</span>
+            <span className="text-sm font-bold text-violet-500">{clinicalCompleteness}%</span>
+          </div>
         </div>
 
         {/* three stage progress stepper */}
@@ -306,10 +336,10 @@ export default function DoctorPage() {
         </div>
 
         {/* two column layout */}
-        <div className="flex gap-5 flex-1">
+        <div className="grid xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)_280px] gap-5 flex-1">
 
           {/* left: input form */}
-          <div className="flex flex-col gap-4 w-[52%]">
+          <div className="flex flex-col gap-4">
 
             {/* session info: patient and doctor name saved with every report */}
             <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-4">
@@ -343,11 +373,11 @@ export default function DoctorPage() {
             </div>
 
             {/* clinical input cards */}
-            {inputFields.map(({ key, label, contextLabel, placeholder }) => (
+            {inputFields.map(({ key, label, short, contextLabel, placeholder }) => (
               <div key={key} className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-violet-500 text-xs">›</span>
+                    <span className="w-6 h-6 rounded-lg bg-violet-600/15 border border-violet-500/20 text-violet-400 text-xs font-bold flex items-center justify-center">{short}</span>
                     <span className="text-sm font-semibold dark:text-white text-gray-900">{label}</span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -358,28 +388,38 @@ export default function DoctorPage() {
                     <button
                       type="button"
                       onClick={() => startVoice(key)}
-                      className={`transition-colors ${listening === key ? "text-red-400 animate-pulse" : "dark:text-gray-500 text-gray-400 dark:hover:text-white hover:text-gray-700"}`}
+                      className={`transition-colors flex items-center gap-1 ${listening === key ? "text-red-400 animate-pulse" : "dark:text-gray-500 text-gray-400 dark:hover:text-white hover:text-gray-700"}`}
                       aria-label={listening === key ? "stop voice input" : "start voice input"}
                     >
                       <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" strokeLinecap="round" strokeLinejoin="round" />
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
+                      {listening === key && <span className="text-xs font-medium">recording</span>}
                     </button>
                   </div>
                 </div>
                 <textarea
                   value={values[key]}
-                  onChange={(e) => setters[key](e.target.value.slice(0, MAX))}
+                  onChange={(e) => handleTextareaInput(e, setters[key])}
                   placeholder={placeholder}
-                  rows={4}
-                  className="w-full bg-transparent text-sm dark:text-gray-300 text-gray-700 dark:placeholder-gray-600 placeholder-gray-400 resize-none focus:outline-none leading-relaxed"
+                  rows={3}
+                  className="w-full min-h-[92px] bg-transparent text-sm dark:text-gray-300 text-gray-700 dark:placeholder-gray-600 placeholder-gray-400 resize-none focus:outline-none leading-relaxed transition-all"
                 />
               </div>
             ))}
 
             {error && (
-              <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">{error}</div>
+              <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex items-center justify-between gap-3">
+                <span>{error}</span>
+                <button type="button" onClick={handleGenerate} className="text-xs font-semibold underline">retry</button>
+              </div>
+            )}
+
+            {lastAction && !error && (
+              <div className="px-4 py-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-500 text-sm">
+                {lastAction}
+              </div>
             )}
 
             <div className="flex gap-3">
@@ -410,8 +450,22 @@ export default function DoctorPage() {
           </div>
 
           {/* right: rich soap report preview with all intelligence sections */}
-          <div className="flex-1 dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-6 flex flex-col gap-4 overflow-y-auto">
+          <div className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-6 flex flex-col gap-4 overflow-y-auto min-h-[620px]">
             {!report ? (
+              <div className="flex-1 flex flex-col gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold dark:text-white text-gray-900">Live Draft Preview</h2>
+                  <p className="text-xs dark:text-gray-500 text-gray-400 mt-1">A lightweight preview appears as clinical fields are filled.</p>
+                </div>
+                {livePreview.length > 0 ? (
+                  <div className="flex flex-col gap-3">
+                    {livePreview.map((line) => (
+                      <div key={line} className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+                        <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed">{line}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
                 <div className="w-14 h-14 rounded-full bg-gradient-to-br from-violet-500/15 to-purple-600/15 border border-violet-500/20 flex items-center justify-center">
                   <svg viewBox="0 0 24 24" className="w-7 h-7 text-violet-400 fill-none stroke-current stroke-1.5">
@@ -421,6 +475,8 @@ export default function DoctorPage() {
                 <p className="text-sm dark:text-gray-500 text-gray-400 max-w-xs">
                   Fill in the patient data and click Generate to create a structured SOAP report.
                 </p>
+              </div>
+                )}
               </div>
             ) : (
               <>
@@ -443,13 +499,21 @@ export default function DoctorPage() {
 
                 {/* four soap section cards */}
                 <div className="grid grid-cols-2 gap-3 shrink-0">
-                  {soapSections.map(({ key, label, desc, accent }) => (
+                  {soapSections.map(({ key, label, desc, accent, badge }) => (
                     <div key={key} className="dark:bg-[#080810] bg-gray-50 rounded-xl p-4 border dark:border-white/8 border-gray-200 flex flex-col gap-2">
-                      <div>
-                        <span className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{label}</span>
-                        <p className="text-xs dark:text-gray-500 text-gray-400">{desc}</p>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-6 h-6 rounded-lg dark:bg-white/8 bg-white border dark:border-white/10 border-gray-200 ${accent} text-xs font-bold flex items-center justify-center`}>{badge}</span>
+                        <div>
+                          <span className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{label}</span>
+                          <p className="text-xs dark:text-gray-500 text-gray-400">{desc}</p>
+                        </div>
                       </div>
-                      <p className="text-xs dark:text-gray-300 text-gray-600 leading-relaxed line-clamp-4">{report[key] as string}</p>
+                      <textarea
+                        value={report[key] as string}
+                        onChange={(e) => updateReportField(key, e.target.value)}
+                        rows={4}
+                        className="w-full bg-transparent text-xs dark:text-gray-300 text-gray-600 leading-relaxed resize-none focus:outline-none"
+                      />
                     </div>
                   ))}
                 </div>
@@ -551,15 +615,42 @@ export default function DoctorPage() {
                       : "bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white"
                   }`}
                 >
-                  {saved ? "✓ saved to database" : saving ? "saving..." : "Save Report"}
+                  {saved ? "saved to session" : saving ? "saving..." : "Save Report"}
                 </button>
               </>
             )}
           </div>
+
+          <aside className="dark:bg-[#0e0e1a] bg-white border dark:border-white/8 border-gray-200 rounded-xl p-5 flex flex-col gap-4">
+            <div>
+              <p className="text-xs font-bold text-violet-500 uppercase tracking-wider">Insights</p>
+              <h2 className="text-sm font-semibold dark:text-white text-gray-900 mt-1">Workflow Status</h2>
+            </div>
+            <div className="space-y-3">
+              <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+                <p className="text-xs dark:text-gray-500 text-gray-400">Completion</p>
+                <div className="h-2 rounded-full dark:bg-white/10 bg-gray-200 mt-2 overflow-hidden">
+                  <div className="h-full bg-violet-600 transition-all" style={{ width: `${clinicalCompleteness}%` }} />
+                </div>
+              </div>
+              <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+                <p className="text-xs dark:text-gray-500 text-gray-400 mb-2">Recording</p>
+                <p className={`text-sm font-semibold ${listening ? "text-red-400" : "dark:text-gray-300 text-gray-600"}`}>
+                  {listening ? "Voice capture active" : "Voice capture idle"}
+                </p>
+              </div>
+              <div className="dark:bg-[#080810] bg-gray-50 border dark:border-white/8 border-gray-200 rounded-xl p-4">
+                <p className="text-xs dark:text-gray-500 text-gray-400 mb-2">Recent activity</p>
+                <p className="text-sm font-semibold dark:text-white text-gray-900">{dbReports.length} reports</p>
+                <p className="text-xs dark:text-gray-500 text-gray-400 mt-1">Last visit: {lastVisit}</p>
+              </div>
+            </div>
+          </aside>
+        </div>
         </div>
       </main>
 
-      <footer className="border-t dark:border-white/8 border-gray-200 py-4 px-6">
+      <footer className="lg:pl-64 border-t dark:border-white/8 border-gray-200 py-4 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <span className="text-xs dark:text-gray-600 text-gray-400">MedIntel MVP — AI Clinical Documentation Platform</span>
           <span className="text-xs dark:text-gray-600 text-gray-400">Powered by Gemini · Neon · FastAPI · Next.js</span>

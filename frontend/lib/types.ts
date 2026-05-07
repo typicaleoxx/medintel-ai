@@ -24,3 +24,8 @@ export interface SavedReport extends SOAPReport {
   doctor_name: string
   created_at: string
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant"
+  text: string
+}
