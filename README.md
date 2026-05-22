@@ -6,7 +6,6 @@ Doctors input symptoms, observations, and diagnosis  the system generates a stru
 
 **Stack:** Next.js · FastAPI · Gemini API · Neon Postgres  
 **Deployment:** Vercel (frontend) · Render (backend)  
-**Cost:** $0 (all free tiers)
 
 ---
 
